@@ -38,3 +38,4 @@ _testmain.go
 
 *.idea/
 test.sh
+modules

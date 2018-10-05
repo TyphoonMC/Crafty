@@ -48,6 +48,8 @@ var (
 		&Cube{"stone", 0},
 		&Cube{"cobblestone", 0},
 		&Cube{"dirt", 0},
+		&Cube{"grass_top", 0},
+		&Cube{"debug", 0},
 	}
 )
 

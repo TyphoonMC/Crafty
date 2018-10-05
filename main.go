@@ -80,7 +80,8 @@ func initGl(win *glfw.Window) {
 
 	gl.MatrixMode(gl.PROJECTION)
 	gl.LoadIdentity()
-	gl.Frustum(-1, 1, -1, 1, 1.0, 3000.0)
+	ratio := float64(w)/float64(h)
+	gl.Frustum(-1, 1, -1 * ratio, 1 * ratio, 1.0, 3000.0)
 	gl.MatrixMode(gl.MODELVIEW)
 	gl.LoadIdentity()
 }
@@ -91,6 +92,8 @@ func camera(win *glfw.Window) {
 
 	gl.MatrixMode(gl.PROJECTION)
 	mgl32.Perspective(60, float32(w)/float32(h), 1, 30000)
+	/*ratio := float64(w)/float64(h)
+	gl.Frustum(-1, 1, -1 * ratio, 1 * ratio, 1.0, 3000.0)*/
 
 	gl.MatrixMode(gl.MODELVIEW)
 	gl.LoadIdentity()
