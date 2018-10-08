@@ -114,12 +114,19 @@ func (game *Game) drawScene() {
 
 	gl.Translatef(game.player.pos.x, -(game.player.pos.y + 3 + headBang), game.player.pos.z)
 
+	mask := FaceMask{}
+
 	for _, c := range game.chunks {
 		coord := Point2D{c.coordinates.x * 16, c.coordinates.y * 16}
 		for x, line := range c.blocks {
 			for y, row := range line {
 				for z, id := range row {
-					game.drawBlock(x+coord.x, y, z+coord.y, id)
+					a := x + coord.x
+					b := z + coord.y
+					if id != 0 {
+						game.calculateMask(a, y, b, &mask)
+					}
+					game.drawBlock(a, y, b, id, &mask)
 				}
 			}
 		}

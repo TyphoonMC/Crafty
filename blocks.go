@@ -7,10 +7,11 @@ const (
 )
 
 type Block interface {
-	Render()
+	Render(*FaceMask)
 	SetTextureIds([]uint32)
 	GetTextureIds() []uint32
 	GetTextures() []string
+	IsTransparent() bool
 }
 
 type Cube struct {
@@ -18,10 +19,10 @@ type Cube struct {
 	textureId uint32
 }
 
-func (cube *Cube) Render() {
+func (cube *Cube) Render(mask *FaceMask) {
 	gl.BindTexture(gl.TEXTURE_2D, cube.textureId)
 
-	drawCube()
+	drawCube(mask)
 }
 func (cube *Cube) GetTextureIds() []uint32 {
 	return []uint32{cube.textureId}
@@ -32,16 +33,22 @@ func (cube *Cube) SetTextureIds(ids []uint32) {
 func (cube *Cube) GetTextures() []string {
 	return []string{cube.texture}
 }
+func (cube *Cube) IsTransparent() bool {
+	return false
+}
 
 type EmptyBlock struct{}
 
-func (empty *EmptyBlock) Render() {}
+func (empty *EmptyBlock) Render(mask *FaceMask) {}
 func (empty *EmptyBlock) GetTextureIds() []uint32 {
 	return []uint32{}
 }
 func (empty *EmptyBlock) SetTextureIds(ids []uint32) {}
 func (empty *EmptyBlock) GetTextures() []string {
 	return []string{}
+}
+func (empty *EmptyBlock) IsTransparent() bool {
+	return true
 }
 
 var (
@@ -75,7 +82,7 @@ func unloadBlockTextures() {
 	}
 }
 
-func (game *Game) drawBlock(x, y, z int, id uint8) {
+func (game *Game) drawBlock(x, y, z int, id uint8, mask *FaceMask) {
 	if id == 0 {
 		return
 	}
@@ -84,7 +91,7 @@ func (game *Game) drawBlock(x, y, z int, id uint8) {
 	if b != nil {
 		gl.PushMatrix()
 		gl.Translatef(float32(x), float32(y), float32(z))
-		b.Render()
+		b.Render(mask)
 		gl.PopMatrix()
 	}
 }

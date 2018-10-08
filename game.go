@@ -1,6 +1,8 @@
 package main
 
-import "github.com/go-gl/glfw/v3.2/glfw"
+import (
+	"github.com/go-gl/glfw/v3.2/glfw"
+)
 
 type Chunk struct {
 	coordinates Point2D
@@ -41,7 +43,7 @@ func (game *Game) loadChunks() {
 
 func (game *Game) setBlockAt(x, y, z int, id uint8) {
 	chunk := Point2D{x / 16, z / 16}
-	b := Point3D{x - chunk.x, y, z - chunk.y}
+	b := Point3D{x - 16*chunk.x, y, z - 16*chunk.y}
 
 	var chk *Chunk = nil
 	for _, c := range game.chunks {
@@ -56,6 +58,35 @@ func (game *Game) setBlockAt(x, y, z int, id uint8) {
 	}
 
 	chk.blocks[b.x][b.y][b.z] = id
+}
+
+func (game *Game) getBlockAt(x, y, z int) uint8 {
+	chunk := Point2D{x / 16, z / 16}
+	b := Point3D{0, y, z - 0}
+	if x >= 0 {
+		b.x = x - 16*chunk.x
+	} else {
+		b.x = -(x - 16*chunk.x)
+	}
+	if z >= 0 {
+		b.z = z - 16*chunk.y
+	} else {
+		b.z = -(z - 16*chunk.y)
+	}
+
+	var chk *Chunk = nil
+	for _, c := range game.chunks {
+		if c.coordinates.x == chunk.x && c.coordinates.y == chunk.y {
+			chk = c
+			break
+		}
+	}
+
+	if chk == nil {
+		return 1
+	}
+
+	return chk.blocks[b.x][b.y][b.z]
 }
 
 func (game *Game) loadChunk(coordinate Point2D) {
