@@ -64,21 +64,28 @@ func (game *Game) movePlayer(rot float32) {
 	y := math.Cos(float64(toRadian32(-game.player.rot.y + rot)))
 	game.player.pos.x += float32(x) * game.player.speed
 	game.player.pos.z += float32(y) * game.player.speed
+
+	chkX := int(game.player.pos.x / 16)
+	chkY := int(game.player.pos.z / 16)
+
+	if chkX != game.middle.x || chkY != game.middle.y {
+		game.newMiddle(Point2D{chkX, chkY})
+	}
 }
 
 func (game *Game) inputLoop() {
 	s := game.player.speed
 	if game.checkKey(glfw.KeyUp) || game.checkKey(glfw.KeyW) {
-		game.movePlayer(0)
-	}
-	if game.checkKey(glfw.KeyDown) || game.checkKey(glfw.KeyS) {
 		game.movePlayer(180)
 	}
+	if game.checkKey(glfw.KeyDown) || game.checkKey(glfw.KeyS) {
+		game.movePlayer(0)
+	}
 	if game.checkKey(glfw.KeyLeft) || game.checkKey(glfw.KeyA) {
-		game.movePlayer(90)
+		game.movePlayer(-90)
 	}
 	if game.checkKey(glfw.KeyRight) || game.checkKey(glfw.KeyD) {
-		game.movePlayer(-90)
+		game.movePlayer(90)
 	}
 	if game.checkKey(glfw.KeySpace) {
 		game.player.pos.y += s
