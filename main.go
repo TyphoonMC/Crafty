@@ -5,11 +5,7 @@ import (
 	"github.com/go-gl/gl/v2.1/gl"
 	"github.com/go-gl/glfw/v3.2/glfw"
 	"github.com/go-gl/mathgl/mgl32"
-)
-
-const (
-	windowWidth  = 960
-	windowHeight = 540
+	"math"
 )
 
 func main() {
@@ -25,12 +21,15 @@ func main() {
 	glfw.WindowHint(glfw.Resizable, glfw.True)
 	glfw.WindowHint(glfw.ContextVersionMajor, 2)
 	glfw.WindowHint(glfw.ContextVersionMinor, 1)
-	window, err := glfw.CreateWindow(800, 600, "Crafty", nil, nil)
+	window, err := glfw.CreateWindow(720, 480, "Crafty", nil, nil)
 	if err != nil {
 		panic(err)
 	}
 	game.win = window
 	window.MakeContextCurrent()
+	/*monitorW, monitorH := glfw.GetCurrentContext().
+	game.win.SetSize(monitorW/2, monitorH/2)
+	game.win.SetPos(monitorW/2, monitorH/2)*/
 
 	if err := gl.Init(); err != nil {
 		panic(err)
@@ -109,7 +108,11 @@ func (game *Game) drawScene() {
 	gl.Rotatef(game.player.rot.x, 1, 0, 0)
 	gl.Rotatef(game.player.rot.y, 0, 1, 0)
 	gl.Rotatef(game.player.rot.z, 0, 0, 1)
-	gl.Translatef(game.player.pos.x, -game.player.pos.y, game.player.pos.z)
+
+	headBang := float32(math.Sin(float64(game.player.pos.x)*5))*0.1
+	headBang += float32(math.Cos(float64(game.player.pos.z)*5))*0.1
+
+	gl.Translatef(game.player.pos.x, -(game.player.pos.y+3+headBang), game.player.pos.z)
 
 	for _, c := range game.chunks {
 		coord := Point2D{c.coordinates.x*16, c.coordinates.y*16}
