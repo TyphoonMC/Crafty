@@ -1,9 +1,9 @@
 package main
 
 type Player struct {
-	pos FPoint3D
-	rot FPoint3D
-	speed float32
+	pos         FPoint3D
+	rot         FPoint3D
+	speed       float32
 	cameraSpeed float32
 }
 

@@ -3,7 +3,6 @@ package main
 import (
 	"github.com/go-gl/glfw/v3.2/glfw"
 	"math"
-	"log"
 )
 
 func (game *Game) setFocused() {
@@ -27,15 +26,15 @@ func (game *Game) keysCallback(w *glfw.Window, key glfw.Key, scancode int, actio
 func (game *Game) cursorCallback(w *glfw.Window, xpos float64, ypos float64) {
 	if game.focus {
 		w, h := game.win.GetSize()
-		x := float64(w)/2
-		y := float64(h)/2
+		x := float64(w) / 2
+		y := float64(h) / 2
 
 		posX, posY := game.win.GetCursorPos()
-		game.player.rot.y += float32(posX-x)*game.player.cameraSpeed
+		game.player.rot.y += float32(posX-x) * game.player.cameraSpeed
 
 		// No screen reverse
-		rX := float32(posY-y)*game.player.cameraSpeed
-		nX := game.player.rot.x+rX
+		rX := float32(posY-y) * game.player.cameraSpeed
+		nX := game.player.rot.x + rX
 		if nX > -90 && nX < 90 {
 			game.player.rot.x = nX
 		}
@@ -61,10 +60,10 @@ func (game *Game) checkKey(key glfw.Key) bool {
 }
 
 func (game *Game) movePlayer(rot float32) {
-	x := math.Sin(float64(toRadian32(-game.player.rot.y+rot)))
-	y := math.Cos(float64(toRadian32(-game.player.rot.y+rot)))
-	game.player.pos.x += float32(x)*game.player.speed
-	game.player.pos.z += float32(y)*game.player.speed
+	x := math.Sin(float64(toRadian32(-game.player.rot.y + rot)))
+	y := math.Cos(float64(toRadian32(-game.player.rot.y + rot)))
+	game.player.pos.x += float32(x) * game.player.speed
+	game.player.pos.z += float32(y) * game.player.speed
 }
 
 func (game *Game) inputLoop() {

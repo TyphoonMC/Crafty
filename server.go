@@ -31,7 +31,7 @@ func runServer(game *Game) {
 											},
 											t.OptInteger{
 												true,
-												int32(len(blocks)-1),
+												int32(len(blocks) - 1),
 											},
 										},
 										commandSetBlock(game),
@@ -50,7 +50,7 @@ func runServer(game *Game) {
 			),
 		},
 		nil,
-		))
+	))
 
 	core.Start()
 }

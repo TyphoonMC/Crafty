@@ -1,12 +1,12 @@
 package main
 
 import (
-	"log"
-	"os"
-	"image"
 	"github.com/go-gl/gl/v2.1/gl"
+	"image"
 	"image/draw"
 	_ "image/png"
+	"log"
+	"os"
 )
 
 func newTexture(file string) uint32 {

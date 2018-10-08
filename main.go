@@ -1,10 +1,10 @@
 package main
 
 import (
-	"log"
 	"github.com/go-gl/gl/v2.1/gl"
 	"github.com/go-gl/glfw/v3.2/glfw"
 	"github.com/go-gl/mathgl/mgl32"
+	"log"
 	"math"
 )
 
@@ -77,8 +77,8 @@ func (game *Game) initGl(win *glfw.Window) {
 
 	gl.MatrixMode(gl.PROJECTION)
 	gl.LoadIdentity()
-	ratio := float64(w)/float64(h)
-	gl.Frustum(-1, 1, -1 * ratio, 1 * ratio, 1.0, 3000.0)
+	ratio := float64(w) / float64(h)
+	gl.Frustum(-1, 1, -1*ratio, 1*ratio, 1.0, 3000.0)
 	gl.MatrixMode(gl.MODELVIEW)
 	gl.LoadIdentity()
 }
@@ -109,13 +109,13 @@ func (game *Game) drawScene() {
 	gl.Rotatef(game.player.rot.y, 0, 1, 0)
 	gl.Rotatef(game.player.rot.z, 0, 0, 1)
 
-	headBang := float32(math.Sin(float64(game.player.pos.x)*5))*0.1
-	headBang += float32(math.Cos(float64(game.player.pos.z)*5))*0.1
+	headBang := float32(math.Sin(float64(game.player.pos.x)*5)) * 0.1
+	headBang += float32(math.Cos(float64(game.player.pos.z)*5)) * 0.1
 
-	gl.Translatef(game.player.pos.x, -(game.player.pos.y+3+headBang), game.player.pos.z)
+	gl.Translatef(game.player.pos.x, -(game.player.pos.y + 3 + headBang), game.player.pos.z)
 
 	for _, c := range game.chunks {
-		coord := Point2D{c.coordinates.x*16, c.coordinates.y*16}
+		coord := Point2D{c.coordinates.x * 16, c.coordinates.y * 16}
 		for x, line := range c.blocks {
 			for y, row := range line {
 				for z, id := range row {

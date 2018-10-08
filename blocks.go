@@ -14,9 +14,10 @@ type Block interface {
 }
 
 type Cube struct {
-	texture string
+	texture   string
 	textureId uint32
 }
+
 func (cube *Cube) Render() {
 	gl.BindTexture(gl.TEXTURE_2D, cube.textureId)
 
@@ -32,7 +33,8 @@ func (cube *Cube) GetTextures() []string {
 	return []string{cube.texture}
 }
 
-type EmptyBlock struct {}
+type EmptyBlock struct{}
+
 func (empty *EmptyBlock) Render() {}
 func (empty *EmptyBlock) GetTextureIds() []uint32 {
 	return []uint32{}

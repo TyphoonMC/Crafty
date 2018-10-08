@@ -4,11 +4,11 @@ import "github.com/go-gl/glfw/v3.2/glfw"
 
 type Chunk struct {
 	coordinates Point2D
-	blocks [16][128][16]uint8
+	blocks      [16][128][16]uint8
 }
 
 type Game struct {
-	win *glfw.Window
+	win   *glfw.Window
 	focus bool
 
 	player *Player
@@ -40,8 +40,8 @@ func (game *Game) loadChunks() {
 }
 
 func (game *Game) setBlockAt(x, y, z int, id uint8) {
-	chunk := Point2D{x/16, z/16}
-	b := Point3D{x-chunk.x, y, z-chunk.y}
+	chunk := Point2D{x / 16, z / 16}
+	b := Point3D{x - chunk.x, y, z - chunk.y}
 
 	var chk *Chunk = nil
 	for _, c := range game.chunks {
