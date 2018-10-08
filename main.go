@@ -2,11 +2,9 @@ package main
 
 import (
 	"log"
-
 	"github.com/go-gl/gl/v2.1/gl"
 	"github.com/go-gl/glfw/v3.2/glfw"
 	"github.com/go-gl/mathgl/mgl32"
-	"fmt"
 )
 
 const (
@@ -15,9 +13,9 @@ const (
 )
 
 func main() {
-	fmt.Println("generating terrain...")
+	log.Println("generating terrain...")
 	game := newGame()
-	fmt.Println("starting...")
+	log.Println("starting...")
 
 	if err := glfw.Init(); err != nil {
 		log.Fatalln("failed to initialize glfw:", err)
@@ -31,6 +29,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	game.win = window
 	window.MakeContextCurrent()
 
 	if err := gl.Init(); err != nil {
@@ -39,12 +38,13 @@ func main() {
 
 	loadBlockTextures()
 
-	initGl(window)
+	game.initGl(window)
+	game.initInput()
 
 	go runServer(game)
 
 	for !window.ShouldClose() {
-		mainLoop(window, game)
+		game.mainLoop()
 		window.SwapBuffers()
 		glfw.PollEvents()
 	}
@@ -52,7 +52,7 @@ func main() {
 	unloadBlockTextures()
 }
 
-func initGl(win *glfw.Window) {
+func (game *Game) initGl(win *glfw.Window) {
 	h, w := win.GetSize()
 	gl.Viewport(0, 0, int32(h), int32(w))
 	gl.ShadeModel(gl.SMOOTH)
@@ -70,12 +70,10 @@ func initGl(win *glfw.Window) {
 	gl.ClearDepth(1)
 	gl.DepthFunc(gl.LEQUAL)
 
-	ambient := []float32{0.5, 0.5, 0.5, 1}
+	ambient := []float32{2, 2, 2, 1}
 	diffuse := []float32{1, 1, 1, 1}
-	lightPosition := []float32{-5, 5, 10, 0}
 	gl.Lightfv(gl.LIGHT0, gl.AMBIENT, &ambient[0])
 	gl.Lightfv(gl.LIGHT0, gl.DIFFUSE, &diffuse[0])
-	gl.Lightfv(gl.LIGHT0, gl.POSITION, &lightPosition[0])
 	gl.Enable(gl.LIGHT0)
 
 	gl.MatrixMode(gl.PROJECTION)
@@ -86,8 +84,8 @@ func initGl(win *glfw.Window) {
 	gl.LoadIdentity()
 }
 
-func camera(win *glfw.Window) {
-	h, w := win.GetSize()
+func (game *Game) camera() {
+	h, w := game.win.GetSize()
 	gl.Viewport(0, 0, int32(h), int32(w))
 
 	gl.MatrixMode(gl.PROJECTION)
@@ -99,30 +97,34 @@ func camera(win *glfw.Window) {
 	gl.LoadIdentity()
 	mgl32.LookAt(0, 60, -180,
 		0, 50, 1,
-		0, 1, 0)
+		0, 0, 0)
 }
 
-func drawScene(game *Game) {
+func (game *Game) drawScene() {
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
 	gl.MatrixMode(gl.MODELVIEW)
 	gl.LoadIdentity()
 
-	gl.Translatef(0, -5, -20.0)
+	gl.Rotatef(game.player.rot.x, 1, 0, 0)
+	gl.Rotatef(game.player.rot.y, 0, 1, 0)
+	gl.Rotatef(game.player.rot.z, 0, 0, 1)
+	gl.Translatef(game.player.pos.x, -game.player.pos.y, game.player.pos.z)
 
 	for _, c := range game.chunks {
 		coord := Point2D{c.coordinates.x*16, c.coordinates.y*16}
 		for x, line := range c.blocks {
 			for y, row := range line {
 				for z, id := range row {
-					drawBlock(game, x+coord.x, y, z+coord.y, id)
+					game.drawBlock(x+coord.x, y, z+coord.y, id)
 				}
 			}
 		}
 	}
 }
 
-func mainLoop(win *glfw.Window, game *Game) {
-	camera(win)
-	drawScene(game)
+func (game *Game) mainLoop() {
+	game.inputLoop()
+	game.camera()
+	game.drawScene()
 }

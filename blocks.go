@@ -73,7 +73,7 @@ func unloadBlockTextures() {
 	}
 }
 
-func drawBlock(game *Game, x, y, z int, id uint8) {
+func (game *Game) drawBlock(x, y, z int, id uint8) {
 	if id == 0 {
 		return
 	}
