@@ -33,7 +33,7 @@ func newGame() *Game {
 		[3][3]*Chunk{},
 	}
 
-	go g.loadChunks()
+	g.loadChunks()
 
 	return &g
 }
