@@ -6,9 +6,13 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 	"log"
 	"math"
+	"time"
+	"runtime"
 )
 
 func main() {
+	runtime.LockOSThread()
+
 	log.Println("generating terrain...")
 	game := newGame()
 	log.Println("starting...")
@@ -82,6 +86,8 @@ func (game *Game) initGl(win *glfw.Window) {
 	gl.Frustum(-1, 1, -1*ratio, 1*ratio, 1.0, 3000.0)
 	gl.MatrixMode(gl.MODELVIEW)
 	gl.LoadIdentity()
+
+	game.initVBO()
 }
 
 func (game *Game) camera() {
@@ -137,7 +143,15 @@ func (game *Game) drawScene() {
 }
 
 func (game *Game) mainLoop() {
+	s := time.Now().UnixNano()
 	game.inputLoop()
 	game.camera()
 	game.drawScene()
+
+	nano := time.Now().UnixNano() - s
+
+	if nano < 33000000 {
+		time.Sleep(time.Duration(33000000 - nano) * time.Nanosecond)
+		//log.Println(nano)
+	}
 }
