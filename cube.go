@@ -31,6 +31,13 @@ func (game *Game) calculateMask(x, y, z int, mask *FaceMask) {
 		return
 	}
 
+	/*mask.top = true
+	mask.bottom = true
+	mask.forward = true
+	mask.backward = true
+	mask.left = true
+	mask.right = true*/
+
 	mask.top = game.isTransparent(x, y, z, &siblings[0])
 	mask.bottom = game.isTransparent(x, y, z, &siblings[1])
 	mask.forward = game.isTransparent(x, y, z, &siblings[2])

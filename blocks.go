@@ -1,6 +1,8 @@
 package main
 
-import "github.com/go-gl/gl/v2.1/gl"
+import (
+	"github.com/go-gl/gl/v2.1/gl"
+)
 
 const (
 	blockTexturePath = "./Rosources/Rosources Texture Pack/assets/minecraft/textures/blocks/"
