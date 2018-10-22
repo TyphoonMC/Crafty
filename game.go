@@ -7,11 +7,13 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"github.com/aquilax/go-perlin"
 )
 
 type Chunk struct {
 	coordinates Point2D
 	Blocks      [16][128][16]uint8
+	mask 		[16][128][16]*FaceMask
 }
 
 type Game struct {
@@ -22,6 +24,8 @@ type Game struct {
 
 	middle Point2D
 	grid   [3][3]*Chunk
+
+	generator *perlin.Perlin
 }
 
 func newGame() *Game {
@@ -31,8 +35,10 @@ func newGame() *Game {
 		newPlayer(),
 		Point2D{0, 0},
 		[3][3]*Chunk{},
+		nil,
 	}
 
+	g.initPerlin(189766828)
 	g.loadChunks()
 
 	return &g
@@ -51,12 +57,13 @@ func (game *Game) unloadChunks() {
 	c := Point2D{}
 	for c.x = 0; c.x < 3; c.x++ {
 		for c.y = 0; c.y < 3; c.y++ {
-			game.unloadChunk(game.grid[c.x-game.middle.x][c.y-game.middle.y])
+			game.saveChunk(game.grid[c.x-game.middle.x][c.y-game.middle.y])
 		}
 	}
 }
 
 func (game *Game) newMiddle(coord Point2D) {
+	log.Println("new middle", coord)
 	game.middle = coord
 
 	cache := make([]*Chunk, 0)
@@ -84,7 +91,7 @@ func (game *Game) newMiddle(coord Point2D) {
 
 	for i, j := range reused {
 		if !j {
-			game.unloadChunk(cache[i])
+			game.saveChunk(cache[i])
 		}
 	}
 }
@@ -111,8 +118,7 @@ func (game *Game) getChunk(x, z int, force bool) *Chunk {
 }
 
 func (game *Game) setBlockAt(x, y, z int, id uint8) {
-	chunk := Point2D{x / 16, z / 16}
-	b := Point3D{x - 16*chunk.x, y, z - 16*chunk.y}
+	chunk, b := game.getChunkBlockAt(x, y, z)
 
 	chk := game.getChunk(chunk.x, chunk.y, true)
 
@@ -120,22 +126,23 @@ func (game *Game) setBlockAt(x, y, z int, id uint8) {
 		panic("chunk not found")
 	}
 
+	log.Println("setblock", chunk, b, x, y, z)
 	chk.Blocks[b.x][b.y][b.z] = id
 }
 
+//TODO fix this
+func (game *Game) getChunkBlockAt(x, y, z int) (*Point2D, *Point3D) {
+	chunk := Point2D{x >> 4, z >> 4}
+	b := Point3D{x & 15, y, z & 15}
+	return &chunk, &b
+}
+
 func (game *Game) getBlockAt(x, y, z int) uint8 {
-	chunk := Point2D{x / 16, z / 16}
-	b := Point3D{0, y, z - 0}
-	if x >= 0 {
-		b.x = x - 16*chunk.x
-	} else {
-		b.x = -(x - 16*chunk.x)
+	if y < 0 || y > 127 {
+		return 0
 	}
-	if z >= 0 {
-		b.z = z - 16*chunk.y
-	} else {
-		b.z = -(z - 16*chunk.y)
-	}
+
+	chunk, b := game.getChunkBlockAt(x, y, z)
 
 	chk := game.getChunk(chunk.x, chunk.y, false)
 
@@ -146,22 +153,25 @@ func (game *Game) getBlockAt(x, y, z int) uint8 {
 	return chk.Blocks[b.x][b.y][b.z]
 }
 
+func (game *Game) getBlockAtF(d *FPoint3D) uint8 {
+	return game.getBlockAt(int(d.x), int(d.y), int(d.z))
+}
+
 func (game *Game) loadChunk(coordinate Point2D) *Chunk {
 	log.Println("loading chunk", coordinate)
 	c := Chunk{coordinates: coordinate}
 
 	if _, err := os.Stat(c.getFile()); os.IsNotExist(err) {
-		for x, a := range c.Blocks {
-			for y, b := range a {
-				for z := range b {
-					if y > 3 {
-						c.Blocks[x][y][z] = 0
-					} else {
-						c.Blocks[x][y][z] = uint8(y)
-					}
+		log.Println("Generating chunk...")
+		for x := 0; x < 16; x++ {
+			for z := 0; z < 16; z++ {
+				high := game.getHigh(c.coordinates.x << 4 + x, c.coordinates.y << 4 + z)
+				for y := 0; y <= high; y++ {
+					c.Blocks[x][y][z] = 1
 				}
 			}
 		}
+		game.saveChunk(&c)
 	} else {
 		data, err := ioutil.ReadFile(c.getFile())
 		if err != nil {
@@ -184,7 +194,7 @@ func (chunk *Chunk) getDirectory() string {
 	return "./map/chunks/" + strconv.Itoa(chunk.coordinates.x)
 }
 
-func (game *Game) unloadChunk(chunk *Chunk) {
+func (game *Game) saveChunk(chunk *Chunk) {
 	log.Println("unloading chunk", chunk.coordinates)
 
 	data, err := gob.Encode(chunk)

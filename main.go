@@ -35,6 +35,14 @@ func main() {
 	game.win.SetSize(monitorW/2, monitorH/2)
 	game.win.SetPos(monitorW/2, monitorH/2)*/
 
+	/*c, b := game.getChunkBlockAt(16, 0, 16)
+	log.Println(16, 0, 16, c, b)
+	c, b = game.getChunkBlockAt(-16, 0, -16)
+	log.Println(-16, 0, -16, c, b)
+	c, b = game.getChunkBlockAt(0, 0, 0)
+	log.Println(0, 0, 0, c, b)
+	return*/
+
 	if err := gl.Init(); err != nil {
 		panic(err)
 	}
@@ -121,20 +129,22 @@ func (game *Game) drawScene() {
 
 	gl.Translatef(-game.player.pos.x, -(game.player.pos.y + 3 + headBang), -game.player.pos.z)
 
-	mask := FaceMask{}
-
 	for _, line := range game.grid {
 		for _, c := range line {
-			coord := Point2D{c.coordinates.x * 16, c.coordinates.y * 16}
+			coord := Point2D{c.coordinates.x << 4, c.coordinates.y << 4}
 			for x, line := range c.Blocks {
 				for y, row := range line {
 					for z, id := range row {
 						a := x + coord.x
 						b := z + coord.y
 						if id != 0 {
-							game.calculateMask(a, y, b, &mask)
+							if c.mask[x][y][z] == nil {
+								m := FaceMask{}
+								game.calculateMask(a, y, b, &m)
+								c.mask[x][y][z] = &m
+							}
 						}
-						game.drawBlock(a, y, b, id, &mask)
+						game.drawBlock(a, y, b, id, c.mask[x][y][z])
 					}
 				}
 			}
@@ -144,6 +154,8 @@ func (game *Game) drawScene() {
 
 func (game *Game) mainLoop() {
 	s := time.Now().UnixNano()
+	game.calculateVelocity()
+	game.calculateGravity()
 	game.inputLoop()
 	game.camera()
 	game.drawScene()
@@ -152,6 +164,5 @@ func (game *Game) mainLoop() {
 
 	if nano < 33000000 {
 		time.Sleep(time.Duration(33000000 - nano) * time.Nanosecond)
-		//log.Println(nano)
 	}
 }

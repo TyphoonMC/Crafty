@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/go-gl/glfw/v3.2/glfw"
 	"math"
+	"github.com/TyphoonMC/TyphoonCore"
 )
 
 func (game *Game) setFocused() {
@@ -62,11 +63,36 @@ func (game *Game) checkKey(key glfw.Key) bool {
 func (game *Game) movePlayer(rot float32) {
 	x := math.Sin(float64(toRadian32(-game.player.rot.y + rot)))
 	y := math.Cos(float64(toRadian32(-game.player.rot.y + rot)))
-	game.player.pos.x += float32(x) * game.player.speed
-	game.player.pos.z += float32(y) * game.player.speed
 
-	chkX := int(game.player.pos.x / 16)
-	chkY := int(game.player.pos.z / 16)
+	nPos := FPoint3D{game.player.pos.x, game.player.pos.y, game.player.pos.z}
+
+	nPos.x += float32(x) * game.player.speed
+	nPos.z += float32(y) * game.player.speed
+
+	nPosInt := FtoPoint3D(&nPos)
+
+	if game.getBlockAt(nPosInt.x, nPosInt.y, nPosInt.z) != 0 &&
+		game.player.gamemode != typhoon.SPECTATOR {
+		return
+	}
+
+	game.player.pos = nPos
+
+	chkX := int(game.player.pos.x) >> 4
+	chkY := int(game.player.pos.z) >> 4
+
+	if chkX != game.middle.x || chkY != game.middle.y {
+		game.newMiddle(Point2D{chkX, chkY})
+	}
+}
+
+func (game *Game) teleportPlayer(x, y, z float32) {
+	game.player.pos.x = float32(x)
+	game.player.pos.x = float32(y)
+	game.player.pos.x = float32(z)
+
+	chkX := int(game.player.pos.x) >> 4
+	chkY := int(game.player.pos.z) >> 4
 
 	if chkX != game.middle.x || chkY != game.middle.y {
 		game.newMiddle(Point2D{chkX, chkY})
@@ -87,10 +113,16 @@ func (game *Game) inputLoop() {
 	if game.checkKey(glfw.KeyRight) || game.checkKey(glfw.KeyD) {
 		game.movePlayer(90)
 	}
-	if game.checkKey(glfw.KeySpace) {
-		game.player.pos.y += s
-	}
-	if game.checkKey(glfw.KeyLeftShift) {
-		game.player.pos.y -= s
+
+	if game.player.gamemode == typhoon.CREATIVE ||
+		game.player.gamemode == typhoon.SPECTATOR {
+		if game.checkKey(glfw.KeySpace) {
+			game.player.pos.y += s
+		}
+		if game.checkKey(glfw.KeyLeftShift) {
+			game.player.pos.y -= s
+		}
+	} else if game.checkKey(glfw.KeySpace) && game.isOnGround(&game.player.pos) {
+		game.player.velocity = FPoint3D{0, .6, 0}
 	}
 }
