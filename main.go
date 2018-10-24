@@ -35,13 +35,16 @@ func main() {
 	game.win.SetSize(monitorW/2, monitorH/2)
 	game.win.SetPos(monitorW/2, monitorH/2)*/
 
-	/*c, b := game.getChunkBlockAt(16, 0, 16)
-	log.Println(16, 0, 16, c, b)
-	c, b = game.getChunkBlockAt(-16, 0, -16)
-	log.Println(-16, 0, -16, c, b)
-	c, b = game.getChunkBlockAt(0, 0, 0)
-	log.Println(0, 0, 0, c, b)
-	return*/
+	/*game.checkBlockCoord(0, 0, 0)
+	game.checkBlockCoord(15, 0, -15)
+	game.checkBlockCoord(16, 0, -16)
+	game.checkBlockCoord(-15, 0, 15)
+	game.checkBlockCoord(-16, 0, 16)
+	game.checkBlockCoord(1567, 0, -158)
+	game.checkBlockCoord(-15, 40, 15)
+	game.checkBlockCoord(-16, 80, 16)
+	game.checkBlockCoord(1567, 34, -158)
+	os.Exit(0)*/
 
 	if err := gl.Init(); err != nil {
 		panic(err)
@@ -62,6 +65,17 @@ func main() {
 
 	unloadBlockTextures()
 	game.unloadChunks()
+}
+
+func (game *Game) checkBlockCoord(x, y, z int) {
+	c, b := game.getChunkBlockAt(x, y, z)
+	log.Println(x, y, z, c, b)
+	d := game.getBlockCoord(c, b)
+	log.Println(d)
+
+	if d.x != x || d.y != y || d.z != z {
+		log.Println("ERR")
+	}
 }
 
 func (game *Game) initGl(win *glfw.Window) {
@@ -127,26 +141,37 @@ func (game *Game) drawScene() {
 	headBang := float32(math.Sin(float64(game.player.pos.x)*5)) * 0.1
 	headBang += float32(math.Cos(float64(game.player.pos.z)*5)) * 0.1
 
-	gl.Translatef(-game.player.pos.x, -(game.player.pos.y + 3 + headBang), -game.player.pos.z)
+	gl.Translatef(-game.player.pos.x, -(game.player.pos.y + 2 + headBang), -game.player.pos.z)
 
-	for _, line := range game.grid {
+	/*for _, line := range game.grid {
 		for _, c := range line {
-			coord := Point2D{c.coordinates.x << 4, c.coordinates.y << 4}
-			for x, line := range c.Blocks {
-				for y, row := range line {
-					for z, id := range row {
-						a := x + coord.x
-						b := z + coord.y
+			b := Point3D{}
+			for b.x = 0; b.x < 16; b.x++ {
+				for b.y = 0; b.y < 128; b.y++ {
+					for b.z = 0; b.z < 16; b.z++ {
+						id := c.Blocks[b.x][b.y][b.z]
+						coord := game.getBlockCoord(&c.coordinates, &b)
 						if id != 0 {
-							if c.mask[x][y][z] == nil {
+							if c.mask[b.x][b.y][b.z] == nil {
 								m := FaceMask{}
-								game.calculateMask(a, y, b, &m)
-								c.mask[x][y][z] = &m
+								game.calculateMask(coord, &m)
+								c.mask[b.x][b.y][b.z] = &m
 							}
+							game.drawBlock(coord.x, coord.y, coord.z, id, c.mask[b.x][b.y][b.z])
 						}
-						game.drawBlock(a, y, b, id, c.mask[x][y][z])
 					}
 				}
+			}
+		}
+	}*/
+
+	mask := &FaceMask{true, true, true, true, true, true}
+	pos := FtoPoint3D(&game.player.pos)
+	for x := -10; x <= 10; x++ {
+		for z := -10; z <= 10; z++ {
+			for y := -10; y <= 10; y++ {
+				id := game.getBlockAt(pos.x+x, pos.y+y, pos.z+z)
+				game.drawBlock(pos.x+x, pos.y+y, pos.z+z, id, mask)
 			}
 		}
 	}

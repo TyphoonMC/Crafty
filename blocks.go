@@ -85,10 +85,6 @@ func unloadBlockTextures() {
 }
 
 func (game *Game) drawBlock(x, y, z int, id uint8, mask *FaceMask) {
-	if id == 0 {
-		return
-	}
-
 	b := blocks[id]
 	if b != nil {
 		gl.PushMatrix()

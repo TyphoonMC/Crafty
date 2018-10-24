@@ -130,11 +130,19 @@ func (game *Game) setBlockAt(x, y, z int, id uint8) {
 	chk.Blocks[b.x][b.y][b.z] = id
 }
 
-//TODO fix this
+func (game *Game) setBlockAtF(d *FPoint3D, id uint8) {
+	game.setBlockAt(int(d.x), int(d.y), int(d.z), id)
+}
+
 func (game *Game) getChunkBlockAt(x, y, z int) (*Point2D, *Point3D) {
 	chunk := Point2D{x >> 4, z >> 4}
 	b := Point3D{x & 15, y, z & 15}
 	return &chunk, &b
+}
+
+func (game *Game) getBlockCoord(c *Point2D, b *Point3D) (*Point3D) {
+	d := Point3D{c.x << 4 + b.x, b.y, c.y << 4 + + b.z}
+	return &d
 }
 
 func (game *Game) getBlockAt(x, y, z int) uint8 {
@@ -163,11 +171,17 @@ func (game *Game) loadChunk(coordinate Point2D) *Chunk {
 
 	if _, err := os.Stat(c.getFile()); os.IsNotExist(err) {
 		log.Println("Generating chunk...")
-		for x := 0; x < 16; x++ {
-			for z := 0; z < 16; z++ {
-				high := game.getHigh(c.coordinates.x << 4 + x, c.coordinates.y << 4 + z)
-				for y := 0; y <= high; y++ {
-					c.Blocks[x][y][z] = 1
+		b := Point3D{}
+		for b.x = 0; b.x < 16; b.x++ {
+			for b.z = 0; b.z < 16; b.z++ {
+				//coord := game.getBlockCoord(&c.coordinates, &b)
+				//high := game.getHigh(coord.x, coord.z)
+				for y := 0; y <= 3; y++ {
+					if y < 3 {
+						c.Blocks[b.x][y][b.z] = 1
+					} else {
+						c.Blocks[b.x][y][b.z] = 3
+					}
 				}
 			}
 		}

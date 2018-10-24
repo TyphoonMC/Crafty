@@ -20,30 +20,30 @@ var (
 	}
 )
 
-func (game *Game) isTransparent(bx, by, bz int, face *Point3D) bool {
-	id := game.getBlockAt(bx+face.x, by+face.y, bz+face.z)
+func (game *Game) isTransparent(coord *Point3D, face *Point3D) bool {
+	id := game.getBlockAt(coord.x+face.x, coord.y+face.y, coord.z+face.z)
 	return blocks[id].IsTransparent()
 }
 
-func (game *Game) calculateMask(x, y, z int, mask *FaceMask) {
-	id := game.getBlockAt(x, y, z)
+func (game *Game) calculateMask(coord *Point3D, mask *FaceMask) {
+	id := game.getBlockAt(coord.x, coord.y, coord.z)
 	if id == 0 {
 		return
 	}
 
-	/*mask.top = true
+	mask.top = true
 	mask.bottom = true
 	mask.forward = true
 	mask.backward = true
 	mask.left = true
-	mask.right = true*/
+	mask.right = true
 
-	mask.top = game.isTransparent(x, y, z, &siblings[0])
-	mask.bottom = game.isTransparent(x, y, z, &siblings[1])
-	mask.forward = game.isTransparent(x, y, z, &siblings[2])
-	mask.backward = game.isTransparent(x, y, z, &siblings[3])
-	mask.left = game.isTransparent(x, y, z, &siblings[4])
-	mask.right = game.isTransparent(x, y, z, &siblings[5])
+	/*mask.top = game.isTransparent(coord, &siblings[0])
+	mask.bottom = game.isTransparent(coord, &siblings[1])
+	mask.forward = game.isTransparent(coord, &siblings[2])
+	mask.backward = game.isTransparent(coord, &siblings[3])
+	mask.left = game.isTransparent(coord, &siblings[4])
+	mask.right = game.isTransparent(coord, &siblings[5])*/
 }
 
 var (

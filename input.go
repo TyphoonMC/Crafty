@@ -4,6 +4,7 @@ import (
 	"github.com/go-gl/glfw/v3.2/glfw"
 	"math"
 	"github.com/TyphoonMC/TyphoonCore"
+	"log"
 )
 
 func (game *Game) setFocused() {
@@ -48,6 +49,17 @@ func (game *Game) mouseButtonCallback(w *glfw.Window, button glfw.MouseButton, a
 	if !game.focus {
 		game.setFocused()
 	}
+
+	if action == glfw.Press {
+		loc, face, err := game.getPlayerBlockInSight(10)
+		if err == nil {
+			if button == glfw.MouseButtonLeft {
+				game.setBlockAt(loc.x + face.x, loc.y + face.y, loc.z + face.z, 0)
+			} else if button == glfw.MouseButtonRight {
+				game.setBlockAt(loc.x + face.x, loc.y + face.y, loc.z + face.z, 4)
+			}
+		}
+	}
 }
 
 func (game *Game) initInput() {
@@ -70,10 +82,16 @@ func (game *Game) movePlayer(rot float32) {
 	nPos.z += float32(y) * game.player.speed
 
 	nPosInt := FtoPoint3D(&nPos)
+	posInt := FtoPoint3D(&game.player.pos)
 
 	if game.getBlockAt(nPosInt.x, nPosInt.y, nPosInt.z) != 0 &&
 		game.player.gamemode != typhoon.SPECTATOR {
-		return
+		if nPosInt.x != posInt.x {
+			nPos.x = game.player.pos.x
+		}
+		if nPosInt.z != posInt.z {
+			nPos.z = game.player.pos.z
+		}
 	}
 
 	game.player.pos = nPos
@@ -112,6 +130,13 @@ func (game *Game) inputLoop() {
 	}
 	if game.checkKey(glfw.KeyRight) || game.checkKey(glfw.KeyD) {
 		game.movePlayer(90)
+	}
+
+	if game.checkKey(glfw.KeyN) {
+		loc := game.player.pos
+		loc.y -= 1
+		c, b := game.getChunkBlockAt(int(loc.x), int(loc.y), int(loc.z))
+		log.Println(game.isOnGround(&game.player.pos), game.getBlockAtF(&loc), c, b, game.player.pos, game.player.rot)
 	}
 
 	if game.player.gamemode == typhoon.CREATIVE ||
