@@ -18,4 +18,7 @@ const (
 	IDLeavesCherry uint8 = 12
 	IDStoneMossy   uint8 = 13
 	IDClay         uint8 = 14
+	IDLanternWarm  uint8 = 15
+	IDLanternCool  uint8 = 16
+	IDMushroomGlow uint8 = 17
 )

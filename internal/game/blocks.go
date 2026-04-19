@@ -41,6 +41,12 @@ type BlockInfo struct {
 	Solid          bool
 	CollisionBoxes []AABB
 	Voxels         [PackVoxelCount]uint8
+	// Lighting metadata. Emissive is derived from BlockFlagEmissive; the
+	// LightR/G/B channels hold the 0..15 packed colour emitted by the block.
+	Emissive bool
+	LightR   uint8
+	LightG   uint8
+	LightB   uint8
 }
 
 // SolidAABBs returns the block-local collision boxes ([0,1]^3) for solid
@@ -93,6 +99,7 @@ func LoadBlockPack() error {
 			Transparent: bd.Flags&BlockFlagTransparent != 0,
 			Translucent: bd.Flags&BlockFlagTranslucent != 0,
 			Solid:       bd.Flags&BlockFlagSolid != 0,
+			Emissive:    bd.Flags&BlockFlagEmissive != 0,
 			Voxels:      bd.Voxels,
 		}
 		info.Opaque = !info.Transparent && !info.Translucent
@@ -105,9 +112,28 @@ func LoadBlockPack() error {
 				info.CollisionBoxes = greedyMergeCollision(&bd.Voxels)
 			}
 		}
+		if info.Emissive {
+			info.LightR, info.LightG, info.LightB = emissiveColor(info.Name)
+		}
 		blocks = append(blocks, info)
 	}
 	return nil
+}
+
+// emissiveColor returns the 0..15 packed RGB light colour emitted by an
+// emissive block. Names drive the palette so new emissive blocks can be added
+// without touching the engine beyond appending an entry here.
+func emissiveColor(name string) (r, g, b uint8) {
+	switch name {
+	case "lantern_warm":
+		return 15, 12, 6
+	case "lantern_cool":
+		return 6, 10, 15
+	case "mushroom_glow":
+		return 8, 15, 8
+	default:
+		return 12, 12, 12
+	}
 }
 
 // defaultBlockAlpha picks the per-block alpha used during rendering based on

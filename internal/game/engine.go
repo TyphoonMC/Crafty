@@ -80,7 +80,7 @@ func (game *Game) refreshChunkMeshes() {
 				r.meshes[c.Coordinates] = m
 			}
 			if m.dirty {
-				opaque, translucent := BuildChunkMesh(c, game.getBlockAt)
+				opaque, translucent := BuildChunkMesh(c, game.getBlockAt, game.sampleLight)
 				r.uploadMesh(m, opaque, translucent)
 			}
 		}

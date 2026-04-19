@@ -13,12 +13,14 @@ const vertexShaderSrc = `#version 330 core
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aNormal;
 layout (location = 2) in vec4 aColor;
+layout (location = 3) in vec4 aLight; // rgb block light + sky
 
 uniform mat4 uMVP;
 uniform vec3 uLightDir;
 uniform float uAmbient;
 
 out vec4 vColor;
+out vec4 vLight;
 out float vBrightness;
 
 void main() {
@@ -26,17 +28,28 @@ void main() {
     float diff = max(dot(normalize(aNormal), normalize(uLightDir)), 0.0);
     vBrightness = uAmbient + (1.0 - uAmbient) * diff;
     vColor = aColor;
+    vLight = aLight;
 }
 `
 
 const fragmentShaderSrc = `#version 330 core
 in vec4 vColor;
+in vec4 vLight;
 in float vBrightness;
 
 out vec4 FragColor;
 
 void main() {
-    FragColor = vec4(vColor.rgb * vBrightness, vColor.a);
+    // Block light (rgb) added to sky light (warm-tinted white).
+    vec3 skyTint = vec3(1.0, 0.96, 0.88);
+    vec3 lighting = vLight.rgb + skyTint * vLight.w;
+    // Mix directional ambient (vBrightness) with static lighting, never fully
+    // dark: minimum 0.12 so pure shadow still shows colour.
+    float staticL = max(max(lighting.r, lighting.g), lighting.b);
+    vec3 lit = vColor.rgb * max(vBrightness * (0.3 + 0.7 * staticL), 0.12);
+    // Coloured tint from block light adds warmth.
+    lit += vColor.rgb * lighting * 0.35;
+    FragColor = vec4(lit, vColor.a);
 }
 `
 
@@ -174,6 +187,8 @@ func uploadVertexStream(vao, vbo *uint32, verts []ChunkVertex) int32 {
 		gl.EnableVertexAttribArray(1)
 		gl.VertexAttribPointerWithOffset(2, 4, gl.FLOAT, false, chunkVertexSize, 6*4)
 		gl.EnableVertexAttribArray(2)
+		gl.VertexAttribPointerWithOffset(3, 4, gl.FLOAT, false, chunkVertexSize, 10*4)
+		gl.EnableVertexAttribArray(3)
 	} else {
 		gl.BindVertexArray(*vao)
 		gl.BindBuffer(gl.ARRAY_BUFFER, *vbo)
