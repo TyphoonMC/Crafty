@@ -160,13 +160,20 @@ func (game *Game) drawScene() {
 
 	// Pass 3: the terminal overlay. Drawn after everything else with depth
 	// test disabled and alpha blending on so the panel sits flat on top of
-	// the world. We only issue draw calls when the terminal is open.
+	// the world. CULL_FACE must be disabled too — the overlay uses 2D
+	// screen-space triangles and, after the vertex shader's Y-flip, they
+	// end up wound CW in NDC which would be classified as backfaces under
+	// the world pass's FrontFace=CCW / CullFace=BACK state and silently
+	// dropped (classic "invisible overlay" bug). Restoring CULL_FACE after
+	// keeps the chunk renderer's assumptions intact.
 	if game.terminal != nil && game.terminal.IsOpen() {
 		gl.Disable(gl.DEPTH_TEST)
+		gl.Disable(gl.CULL_FACE)
 		gl.Enable(gl.BLEND)
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 		game.terminal.Render(r.viewportW, r.viewportH)
 		gl.Disable(gl.BLEND)
+		gl.Enable(gl.CULL_FACE)
 		gl.Enable(gl.DEPTH_TEST)
 	}
 }
