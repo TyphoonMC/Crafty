@@ -1,44 +1,46 @@
-# Binaries for programs and plugins
+# Binaries
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-
-# Test binary, build with `go test -c`
-*.test
-
-# Output of the go coverage tool, specifically when used with LiteIDE
-*.out
-
-# Compiled Object files, Static and Dynamic libs (Shared Objects)
 *.o
 *.a
-*.so
 
-# Folders
-_obj
-_test
+# Test / coverage
+*.test
+*.out
+*.prof
+coverage.html
 
-# Architecture specific extensions/prefixes
-*.[568vq]
-[568vq].out
+# Build artifacts
+bin/
+dist/
+/Crafty
+/crafty
 
+# World data
+map/
+
+# CGO leftovers
 *.cgo1.go
 *.cgo2.c
 _cgo_defun.c
 _cgo_gotypes.go
 _cgo_export.*
-
 _testmain.go
 
-*.exe
-*.test
-*.prof
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
 
-*.idea/
-test.sh
-modules
+# Local overrides
+.env
+.env.*
+!.env.example
 
-Crafty
-map
+# Tool-generated
+CLAUDE.md
+**/CLAUDE.md

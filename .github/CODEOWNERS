@@ -1,0 +1,14 @@
+# Default owners for everything in the repo
+*                    @TyphoonMC
+
+# CI / build / security infrastructure
+/.github/            @TyphoonMC
+/build/              @TyphoonMC
+/scripts/            @TyphoonMC
+/Makefile            @TyphoonMC
+/.golangci.yml       @TyphoonMC
+/.goreleaser.yaml    @TyphoonMC
+
+# Security-sensitive surfaces
+/internal/server/    @TyphoonMC
+/SECURITY.md         @TyphoonMC

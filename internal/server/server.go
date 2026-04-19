@@ -1,11 +1,15 @@
-package main
+package server
 
 import (
-	t "github.com/TyphoonMC/TyphoonCore"
 	"strconv"
+
+	t "github.com/TyphoonMC/TyphoonCore"
+	"github.com/TyphoonMC/Crafty/internal/game"
 )
 
-func runServer(game *Game) {
+// Run starts the embedded TyphoonCore server exposing admin commands
+// (/sb, /tp, /gm, /stop) that operate on the running game instance.
+func Run(g *game.Game) {
 	core := t.Init()
 	core.SetBrand("Crafty")
 
@@ -25,16 +29,10 @@ func runServer(game *Game) {
 									t.CommandNodeArgument("type",
 										nil,
 										&t.CommandParserInteger{
-											t.OptInteger{
-												true,
-												0,
-											},
-											t.OptInteger{
-												true,
-												int32(len(blocks) - 1),
-											},
+											Min: t.OptInteger{Used: true, Value: 0},
+											Max: t.OptInteger{Used: true, Value: int32(game.BlockCount() - 1)},
 										},
-										commandSetBlock(game),
+										commandSetBlock(g),
 									),
 								},
 								&t.CommandParserInteger{},
@@ -61,7 +59,7 @@ func runServer(game *Game) {
 							t.CommandNodeArgument("z",
 								nil,
 								&t.CommandParserFloat{},
-								commandTeleport(game),
+								commandTeleport(g),
 							),
 						},
 						&t.CommandParserFloat{},
@@ -80,21 +78,21 @@ func runServer(game *Game) {
 			t.CommandNodeLiteral("survival",
 				[]*t.CommandNode{},
 				func(player *t.Player, args []string) {
-					game.player.gamemode = t.SURVIVAL
+					g.SetGamemode(t.SURVIVAL)
 					player.SendMessage(t.ChatMessage("Gamemode: Survival"))
 				},
 			),
 			t.CommandNodeLiteral("creative",
 				[]*t.CommandNode{},
 				func(player *t.Player, args []string) {
-					game.player.gamemode = t.CREATIVE
+					g.SetGamemode(t.CREATIVE)
 					player.SendMessage(t.ChatMessage("Gamemode: Creative"))
 				},
 			),
 			t.CommandNodeLiteral("spectator",
 				[]*t.CommandNode{},
 				func(player *t.Player, args []string) {
-					game.player.gamemode = t.SPECTATOR
+					g.SetGamemode(t.SPECTATOR)
 					player.SendMessage(t.ChatMessage("Gamemode: Spectator"))
 				},
 			),
@@ -105,32 +103,32 @@ func runServer(game *Game) {
 	core.DeclareCommand(t.CommandNodeLiteral("stop",
 		nil,
 		func(player *t.Player, args []string) {
-			game.win.SetShouldClose(true)
+			g.Window().SetShouldClose(true)
 		},
 	))
 
 	core.Start()
 }
 
-func commandSetBlock(game *Game) func(player *t.Player, args []string) {
+func commandSetBlock(g *game.Game) func(player *t.Player, args []string) {
 	return func(player *t.Player, args []string) {
 		x, _ := strconv.Atoi(args[1])
 		y, _ := strconv.Atoi(args[2])
 		z, _ := strconv.Atoi(args[3])
 		id, _ := strconv.Atoi(args[4])
-		game.setBlockAt(x, y, z, uint8(id))
+		g.SetBlockAt(x, y, z, uint8(id))
 
 		player.SendMessage(t.ChatMessage("Block placé"))
 	}
 }
 
-func commandTeleport(game *Game) func(player *t.Player, args []string) {
+func commandTeleport(g *game.Game) func(player *t.Player, args []string) {
 	return func(player *t.Player, args []string) {
 		x, _ := strconv.ParseFloat(args[1], 32)
 		y, _ := strconv.ParseFloat(args[2], 32)
 		z, _ := strconv.ParseFloat(args[3], 32)
 
-		game.teleportPlayer(float32(x), float32(y), float32(z))
+		g.TeleportPlayer(float32(x), float32(y), float32(z))
 
 		player.SendMessage(t.ChatMessage("Téléporté"))
 	}

@@ -1,24 +1,24 @@
-package main
+package game
 
-import "github.com/TyphoonMC/TyphoonCore"
+import typhoon "github.com/TyphoonMC/TyphoonCore"
 
 type Player struct {
 	pos         FPoint3D
 	rot         FPoint3D
 	speed       float32
 	cameraSpeed float32
-	velocity	FPoint3D
+	velocity    FPoint3D
 	gamemode    typhoon.Gamemode
 }
 
 func newPlayer() *Player {
 	return &Player{
-		FPoint3D{0, 3, 0},
-		FPoint3D{0, 0, 0},
-		0.2,
-		0.2,
-		FPoint3D{0, 0, 0},
-		typhoon.SURVIVAL,
+		pos:         FPoint3D{0, 110, 0},
+		rot:         FPoint3D{0, 0, 0},
+		speed:       0.2,
+		cameraSpeed: 0.2,
+		velocity:    FPoint3D{0, 0, 0},
+		gamemode:    typhoon.SURVIVAL,
 	}
 }
 

@@ -1,10 +1,11 @@
-package main
+package game
 
 import (
-	"github.com/go-gl/glfw/v3.2/glfw"
-	"math"
-	"github.com/TyphoonMC/TyphoonCore"
 	"log"
+	"math"
+
+	typhoon "github.com/TyphoonMC/TyphoonCore"
+	"github.com/go-gl/glfw/v3.3/glfw"
 )
 
 func (game *Game) setFocused() {
@@ -18,51 +19,65 @@ func (game *Game) setUnfocused() {
 }
 
 func (game *Game) keysCallback(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
-	switch key {
-	case glfw.KeyEscape:
+	if action != glfw.Press {
+		return
+	}
+	game.mu.Lock()
+	defer game.mu.Unlock()
+	if key == glfw.KeyEscape {
 		game.setUnfocused()
-		break
 	}
 }
 
 func (game *Game) cursorCallback(w *glfw.Window, xpos float64, ypos float64) {
-	if game.focus {
-		w, h := game.win.GetSize()
-		x := float64(w) / 2
-		y := float64(h) / 2
-
-		posX, posY := game.win.GetCursorPos()
-		game.player.rot.y += float32(posX-x) * game.player.cameraSpeed
-
-		// No screen reverse
-		rX := float32(posY-y) * game.player.cameraSpeed
-		nX := game.player.rot.x + rX
-		if nX > -90 && nX < 90 {
-			game.player.rot.x = nX
-		}
-
-		game.win.SetCursorPos(float64(w)/2, float64(h)/2)
+	game.mu.Lock()
+	defer game.mu.Unlock()
+	if !game.focus {
+		return
 	}
+	width, height := game.win.GetSize()
+	cx := float64(width) / 2
+	cy := float64(height) / 2
+
+	posX, posY := game.win.GetCursorPos()
+	game.player.rot.y += float32(posX-cx) * game.player.cameraSpeed
+
+	rX := float32(posY-cy) * game.player.cameraSpeed
+	nX := game.player.rot.x + rX
+	if nX > -90 && nX < 90 {
+		game.player.rot.x = nX
+	}
+
+	game.win.SetCursorPos(cx, cy)
 }
 
 func (game *Game) mouseButtonCallback(w *glfw.Window, button glfw.MouseButton, action glfw.Action, mod glfw.ModifierKey) {
+	game.mu.Lock()
+	defer game.mu.Unlock()
+
 	if !game.focus {
 		game.setFocused()
+		return
+	}
+	if action != glfw.Press {
+		return
 	}
 
-	if action == glfw.Press {
-		loc, face, err := game.getPlayerBlockInSight(10)
-		if err == nil {
-			if button == glfw.MouseButtonLeft {
-				game.setBlockAt(loc.x + face.x, loc.y + face.y, loc.z + face.z, 0)
-			} else if button == glfw.MouseButtonRight {
-				game.setBlockAt(loc.x + face.x, loc.y + face.y, loc.z + face.z, 4)
-			}
-		}
+	loc, face, err := game.getPlayerBlockInSight(10)
+	if err != nil {
+		return
+	}
+	switch button {
+	case glfw.MouseButtonLeft:
+		// Break the block we're looking at.
+		game.setBlockAtLocked(loc.x, loc.y, loc.z, 0)
+	case glfw.MouseButtonRight:
+		// Place a block on the face we're looking at (adjacent empty cell).
+		game.setBlockAtLocked(loc.x+face.x, loc.y+face.y, loc.z+face.z, 4)
 	}
 }
 
-func (game *Game) initInput() {
+func (game *Game) InitInput() {
 	game.win.SetKeyCallback(game.keysCallback)
 	game.win.SetCursorPosCallback(game.cursorCallback)
 	game.win.SetMouseButtonCallback(game.mouseButtonCallback)
@@ -77,7 +92,6 @@ func (game *Game) movePlayer(rot float32) {
 	y := math.Cos(float64(toRadian32(-game.player.rot.y + rot)))
 
 	nPos := FPoint3D{game.player.pos.x, game.player.pos.y, game.player.pos.z}
-
 	nPos.x += float32(x) * game.player.speed
 	nPos.z += float32(y) * game.player.speed
 
@@ -96,21 +110,29 @@ func (game *Game) movePlayer(rot float32) {
 
 	game.player.pos = nPos
 
-	chkX := int(game.player.pos.x) >> 4
-	chkY := int(game.player.pos.z) >> 4
+	chkX := floorInt(game.player.pos.x) >> 4
+	chkY := floorInt(game.player.pos.z) >> 4
 
 	if chkX != game.middle.x || chkY != game.middle.y {
 		game.newMiddle(Point2D{chkX, chkY})
 	}
 }
 
-func (game *Game) teleportPlayer(x, y, z float32) {
-	game.player.pos.x = float32(x)
-	game.player.pos.x = float32(y)
-	game.player.pos.x = float32(z)
+// TeleportPlayer safely teleports the player from another goroutine.
+func (game *Game) TeleportPlayer(x, y, z float32) {
+	game.mu.Lock()
+	defer game.mu.Unlock()
+	game.teleportPlayerLocked(x, y, z)
+}
 
-	chkX := int(game.player.pos.x) >> 4
-	chkY := int(game.player.pos.z) >> 4
+func (game *Game) teleportPlayerLocked(x, y, z float32) {
+	game.player.pos.x = x
+	game.player.pos.y = y
+	game.player.pos.z = z
+	game.player.velocity = FPoint3D{}
+
+	chkX := floorInt(game.player.pos.x) >> 4
+	chkY := floorInt(game.player.pos.z) >> 4
 
 	if chkX != game.middle.x || chkY != game.middle.y {
 		game.newMiddle(Point2D{chkX, chkY})
@@ -135,7 +157,7 @@ func (game *Game) inputLoop() {
 	if game.checkKey(glfw.KeyN) {
 		loc := game.player.pos
 		loc.y -= 1
-		c, b := game.getChunkBlockAt(int(loc.x), int(loc.y), int(loc.z))
+		c, b := game.getChunkBlockAt(floorInt(loc.x), floorInt(loc.y), floorInt(loc.z))
 		log.Println(game.isOnGround(&game.player.pos), game.getBlockAtF(&loc), c, b, game.player.pos, game.player.rot)
 	}
 
