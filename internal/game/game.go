@@ -59,6 +59,20 @@ type Game struct {
 
 	// terminal is the in-game console overlay (press T or / to open).
 	terminal *Terminal
+
+	// Camera frustum updated once per frame in drawScene. Streaming and
+	// rendering both consult it to skip out-of-view sectors at LOD 1+.
+	frustum Frustum
+
+	// Sector streaming scratch buffers reused across frames so we don't
+	// thrash the allocator. pendingSectors is the priority-ordered queue
+	// of (tier, sectorCoord) pairs waiting for a mesh build this frame;
+	// frustumSectors is every sector currently in the frustum (used by
+	// the LRU touch pass); sectorSetScratch dedupes sector keys during
+	// streaming.
+	pendingSectors   []pendingSector
+	frustumSectors   []lodMeshKey
+	sectorSetScratch map[lodMeshKey]struct{}
 }
 
 func NewGame() *Game {

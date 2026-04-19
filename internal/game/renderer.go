@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"sort"
 	"unsafe"
 
 	"github.com/go-gl/gl/v3.3-core/gl"
@@ -63,16 +64,34 @@ type chunkMesh struct {
 	dirty          bool
 }
 
-// lodMesh is the distant-tier counterpart to chunkMesh. Solid terrain lives
-// in the opaque stream; water tops live in the translucent stream so they
-// blend seamlessly with LOD 0 water (same 0.55 alpha).
+// lodMesh is the distant-tier counterpart to chunkMesh. Each instance
+// batches a whole LOD sector (edge = lodSectorSize(tier) chunks) into
+// one opaque + one translucent draw call. The translucent stream is
+// populated at LOD 1/2 (water) and left empty at LOD 3/4.
+//
+// tier, sectorCoord and lastUsed are bookkeeping for the LOD sector
+// cache: tier drives step/size, sectorCoord is the map key, lastUsed
+// feeds the LRU eviction pass.
 type lodMesh struct {
-	opaqueVAO        uint32
-	opaqueVBO        uint32
-	opaqueCount      int32
+	tier        int
+	sectorCoord Point2D
+	lastUsed    uint64
+
+	opaqueVAO   uint32
+	opaqueVBO   uint32
+	opaqueCount int32
+
 	translucentVAO   uint32
 	translucentVBO   uint32
 	translucentCount int32
+}
+
+// lodMeshKey identifies an LOD sector mesh inside the renderer's cache.
+// Two distinct tiers can cover the same chunk (e.g. when the player
+// crosses a ring boundary) — keying by both avoids collisions.
+type lodMeshKey struct {
+	tier   int
+	sector Point2D
 }
 
 type renderer struct {
@@ -83,9 +102,13 @@ type renderer struct {
 	uAmbient  int32
 
 	meshes map[Point2D]*chunkMesh
-	// lodMeshes holds the distant-tier surface meshes keyed by chunk
-	// coordinate. Populated lazily from Game.surfaces each frame.
-	lodMeshes map[Point2D]*lodMesh
+	// lodMeshes holds the distant-tier sector meshes keyed by
+	// (tier, sectorCoord). Populated lazily by streamChunks; the LRU
+	// eviction pass trims them back to `lruMeshBudget` entries.
+	lodMeshes map[lodMeshKey]*lodMesh
+	// lodClock is a monotonically increasing stamp used to age lodMesh
+	// entries for LRU eviction.
+	lodClock uint64
 
 	viewportW int32
 	viewportH int32
@@ -95,7 +118,7 @@ type renderer struct {
 func newRenderer() *renderer {
 	return &renderer{
 		meshes:    make(map[Point2D]*chunkMesh),
-		lodMeshes: make(map[Point2D]*lodMesh),
+		lodMeshes: make(map[lodMeshKey]*lodMesh),
 		aspect:    16.0 / 9.0,
 	}
 }
@@ -183,11 +206,46 @@ func (r *renderer) evict(active map[Point2D]struct{}) {
 	}
 }
 
-// evictLODMeshes drops distant-tier meshes whose surface entries have been
-// removed (promoted to LOD 0, or scrolled outside the horizon ring).
-func (r *renderer) evictLODMeshes(active map[Point2D]struct{}) {
+// evictLODMeshes drops sector meshes whose keys are not in `active`.
+// Used to retire sectors that fell outside the horizon after a teleport
+// or a long walk.
+func (r *renderer) evictLODMeshes(active map[lodMeshKey]struct{}) {
 	for k, m := range r.lodMeshes {
 		if _, ok := active[k]; !ok {
+			r.freeLODMesh(m)
+			delete(r.lodMeshes, k)
+		}
+	}
+}
+
+// trimLODLRU evicts least-recently-used sector meshes until the cache
+// is at or below `lruMeshBudget`. Called after each streaming pass so
+// we don't accumulate unbounded distant geometry when the player walks
+// a long way. Keys that appear in `pinned` are never evicted (used to
+// protect sectors that are currently in the frustum).
+func (r *renderer) trimLODLRU(pinned map[lodMeshKey]struct{}) {
+	if len(r.lodMeshes) <= lruMeshBudget {
+		return
+	}
+	type keyed struct {
+		key   lodMeshKey
+		stamp uint64
+	}
+	candidates := make([]keyed, 0, len(r.lodMeshes))
+	for k, m := range r.lodMeshes {
+		if _, pin := pinned[k]; pin {
+			continue
+		}
+		candidates = append(candidates, keyed{k, m.lastUsed})
+	}
+	// Sort ascending by lastUsed stamp so the oldest entries evict first.
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].stamp < candidates[j].stamp
+	})
+	excess := len(r.lodMeshes) - lruMeshBudget
+	for i := 0; i < excess && i < len(candidates); i++ {
+		k := candidates[i].key
+		if m, ok := r.lodMeshes[k]; ok {
 			r.freeLODMesh(m)
 			delete(r.lodMeshes, k)
 		}
@@ -219,9 +277,7 @@ func (r *renderer) freeLODMesh(m *lodMesh) {
 	m.translucentCount = 0
 }
 
-// uploadLODMesh replaces both the opaque and translucent vertex streams of
-// a distant-tier mesh. Attribute layout is identical to the chunk mesh so
-// the streams share the chunk shader program.
+// uploadLODMesh replaces both vertex streams of a sector mesh.
 func (r *renderer) uploadLODMesh(m *lodMesh, opaque, translucent []ChunkVertex) {
 	m.opaqueCount = uploadVertexStream(&m.opaqueVAO, &m.opaqueVBO, opaque)
 	m.translucentCount = uploadVertexStream(&m.translucentVAO, &m.translucentVBO, translucent)

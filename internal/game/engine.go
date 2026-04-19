@@ -100,11 +100,17 @@ func (game *Game) drawScene() {
 
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
-	game.refreshChunkMeshes()
-
 	proj := game.buildProjection()
 	view := game.buildView()
 	mvp := proj.Mul4(view)
+	game.frustum = expandedFrustum(ExtractFrustum(mvp), cullMargin)
+
+	// Streaming runs every frame so newly visible sectors enter the
+	// queue as the camera rotates. Only LOD 1+ honour the frustum — the
+	// LOD 0 pass inside streamChunks always loads the player's square.
+	game.streamChunks()
+
+	game.refreshChunkMeshes()
 
 	gl.UseProgram(r.program)
 	gl.UniformMatrix4fv(r.uMVP, 1, false, &mvp[0])
@@ -128,6 +134,9 @@ func (game *Game) drawScene() {
 		if m.opaqueCount == 0 {
 			continue
 		}
+		if !game.frustum.SectorVisible(m.sectorCoord, m.tier) {
+			continue
+		}
 		gl.BindVertexArray(m.opaqueVAO)
 		gl.DrawArrays(gl.TRIANGLES, 0, m.opaqueCount)
 	}
@@ -148,6 +157,9 @@ func (game *Game) drawScene() {
 	}
 	for _, m := range r.lodMeshes {
 		if m.translucentCount == 0 {
+			continue
+		}
+		if !game.frustum.SectorVisible(m.sectorCoord, m.tier) {
 			continue
 		}
 		gl.BindVertexArray(m.translucentVAO)
@@ -176,6 +188,20 @@ func (game *Game) drawScene() {
 		gl.Enable(gl.CULL_FACE)
 		gl.Enable(gl.DEPTH_TEST)
 	}
+}
+
+// expandedFrustum pushes every plane outward by `marginChunks * 16` world
+// units so rotation has hysteresis: meshes just off the edge of the visible
+// area stay live for a frame or two instead of flickering.
+func expandedFrustum(f Frustum, marginChunks int) Frustum {
+	if !f.valid || marginChunks <= 0 {
+		return f
+	}
+	margin := float32(marginChunks * 16)
+	for i := range f.planes {
+		f.planes[i][3] += margin
+	}
+	return f
 }
 
 const targetFrameNanos = 16_666_666

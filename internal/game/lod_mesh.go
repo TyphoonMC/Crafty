@@ -1,66 +1,68 @@
 package game
 
-// BuildSurfaceMesh produces a simple top-face + side-skirt mesh for the given
-// chunk surface at the requested LOD level. `neighbour(dx, dz)` returns the
-// neighbouring surface at chunk offset (dx, dz), or nil if unavailable.
-// Pass nil to keep the legacy no-seam-fix behaviour (intra-chunk only).
+// Distant-tier sector meshing.
 //
-// `lod` controls the sampling stride: step = 1 << lod, so LOD 0 = per-block,
-// LOD 2 = every 4 blocks. Only the top face (plus side skirts when a
-// neighbour column is lower) is emitted — no bottom, no back-side faces
-// between adjacent columns.
+// A sector is a square of chunks (edge = lodSectorSize(tier) chunks).
+// BuildSectorMesh rasterises every column in the sector at a stride of
+// `step = 1 << tier` blocks, emitting one top quad per sample plus side
+// skirts to lower neighbours (both within-sector and cross-sector).
 //
-// The mesh is split into two vertex streams: `opaque` for solid terrain
-// (grass, stone, snow…) and `translucent` for water tops. Per-vertex light
-// is the ambient-outdoor fallback: no block light, full sky light, so the
-// shared chunk shader lights the distant terrain correctly without needing
-// a second program.
+// Vertex data uses the same layout as the regular chunk mesh so draws
+// share the chunk shader. Per-vertex light is the ambient-outdoor
+// fallback (block light = 0, sky light = 1).
 //
-// `neighbour(dx, dz)` resolves a neighbouring chunk surface so skirts can
-// be emitted across chunk boundaries, eliminating visible gaps at the
-// distant-tier seams.
-func BuildSurfaceMesh(surf *ChunkSurface, lod int, neighbour func(dx, dz int) *ChunkSurface) (opaque, translucent []ChunkVertex) {
-	if surf == nil {
-		return nil, nil
-	}
-	step := 1 << lod
+// Water handling:
+//   - Tier 1/2 (step 2/4) routes water to the translucent stream so it
+//     blends correctly with opaque terrain below.
+//   - Tier 3/4 (step 8/16) omits water entirely. At those strides the
+//     mesh cells are coarser than visible water extent; the clear colour
+//     (sky blue) shows through and reads as distant ocean.
+
+// lodSampler returns the visible surface height and block id at world
+// column (wx, wz). Implementations either read a cached ChunkSurface
+// (LOD 1/2) or sample the terrain generator directly (LOD 3/4).
+type lodSampler func(wx, wz int) (h int, id uint8)
+
+// BuildSectorMesh emits the opaque and translucent vertex streams for a
+// sector at the given tier. `sectorCoord` is the lower-left chunk of
+// the sector. `sample` supplies column data; it must be safe to call for
+// any column inside the sector and for one-step neighbours outside
+// (needed for cross-sector skirts).
+func BuildSectorMesh(sectorCoord Point2D, tier int, sample lodSampler) (opaque, translucent []ChunkVertex) {
+	step := stepForLOD(tier)
 	if step < 1 {
 		step = 1
 	}
-	if step > 16 {
-		step = 16
+	size := lodSectorSize(tier)
+	sectorBlocks := size * 16
+
+	baseX := sectorCoord.x << 4
+	baseZ := sectorCoord.y << 4
+
+	// Coarse sector means fewer cells; allocate a small starting capacity.
+	cells := (sectorBlocks / step) * (sectorBlocks / step)
+	opaque = make([]ChunkVertex, 0, cells*6)
+	if tier < 3 {
+		translucent = make([]ChunkVertex, 0, cells)
 	}
 
-	baseX := surf.Coordinates.x << 4
-	baseZ := surf.Coordinates.y << 4
+	dropWater := tier >= 3
 
-	opaque = make([]ChunkVertex, 0, 64)
-	translucent = make([]ChunkVertex, 0, 16)
-
-	// neighbourHeight fetches the height of the column at local coordinates
-	// (nbx, nbz) inside the neighbour chunk at offset (dx, dz). Returns
-	// (0, false) when the neighbour is unavailable (nil closure or nil
-	// surface), causing the caller to skip the cross-chunk skirt.
-	neighbourHeight := func(dx, dz, nbx, nbz int) (int, bool) {
-		if neighbour == nil {
-			return 0, false
-		}
-		ns := neighbour(dx, dz)
-		if ns == nil {
-			return 0, false
-		}
-		return ns.Heights[nbx][nbz], true
-	}
-
-	// Top quads: one per sample cell. We pick the representative column at
-	// (bx, bz) and extend the quad by `step` along +X and +Z.
-	for bx := 0; bx < 16; bx += step {
-		for bz := 0; bz < 16; bz += step {
-			id := surf.Surface[bx][bz]
+	// Iterate sector-local block coordinates in steps. The sampler is
+	// called once per cell plus once per neighbouring cell for skirts;
+	// that's ~5 calls per cell. At tier 4 this is ~225 calls per sector
+	// total — cheap.
+	for bx := 0; bx < sectorBlocks; bx += step {
+		for bz := 0; bz < sectorBlocks; bz += step {
+			wx := baseX + bx
+			wz := baseZ + bz
+			h, id := sample(wx, wz)
 			if id == IDAir {
 				continue
 			}
-			h := surf.Heights[bx][bz]
+			if dropWater && id == IDWater {
+				continue
+			}
 
 			info := Block(id)
 			if info == nil {
@@ -68,101 +70,85 @@ func BuildSurfaceMesh(surf *ChunkSurface, lod int, neighbour func(dx, dz int) *C
 			}
 			color := info.Color
 
-			// Route water tops into the translucent stream so they match
-			// the LOD 0 water alpha (0.55, see defaultBlockAlpha). Solid
-			// terrain stays opaque at alpha 1.
 			isWater := id == IDWater
-			topAlpha := float32(1.0)
-			topOut := &opaque
+			alpha := float32(1.0)
 			if isWater {
-				topAlpha = 0.55
-				topOut = &translucent
+				alpha = info.Alpha
 			}
 
-			appendSurfaceTop(topOut, float32(baseX+bx), float32(baseX+bx+step),
-				float32(h+1),
-				float32(baseZ+bz), float32(baseZ+bz+step),
-				color, topAlpha)
+			x0 := float32(wx)
+			x1 := float32(wx + step)
+			z0 := float32(wz)
+			z1 := float32(wz + step)
+			yTop := float32(h + 1)
 
-			// Side skirts towards lower neighbours. Intra-chunk cells look
-			// at the adjacent column in the same surface; cells at the
-			// chunk boundary consult the neighbouring chunk's surface via
-			// the `neighbour` closure so skirts are emitted across chunk
-			// boundaries too.
-			//
-			// Skirts always go into the opaque stream: they're emitted for
-			// the current column's terrain face, not for the (potentially
-			// water) neighbour below. Water columns sit at sea level and
-			// never have a lower neighbour within the same chunk, so they
-			// don't produce skirts in practice.
-			//
-			// +X neighbour.
-			if bx+step < 16 {
-				nh := surf.Heights[bx+step][bz]
-				if nh < h {
-					appendSurfaceSideX(&opaque,
-						float32(baseX+bx+step),
-						float32(nh+1), float32(h+1),
-						float32(baseZ+bz), float32(baseZ+bz+step),
-						+1, color, 1.0)
+			if isWater {
+				appendSurfaceTop(&translucent, x0, x1, yTop, z0, z1, color, alpha)
+			} else {
+				appendSurfaceTop(&opaque, x0, x1, yTop, z0, z1, color, alpha)
+			}
+
+			// Side skirts — every direction. Skirts go to opaque unless
+			// the current cell is water (translucent side for water, but
+			// water skirts only form when the neighbour is lower, which
+			// means it's land below sea level — which we already flooded
+			// to water so the neighbour height is also at sea level.
+			// Side skirts for water therefore almost never emit, but we
+			// still route them correctly when they do).
+			emitSkirt := func(nh int, axis byte, dir int) {
+				if nh >= h {
+					return
 				}
-			} else if nh, ok := neighbourHeight(1, 0, 0, bz); ok && nh < h {
-				appendSurfaceSideX(&opaque,
-					float32(baseX+bx+step),
-					float32(nh+1), float32(h+1),
-					float32(baseZ+bz), float32(baseZ+bz+step),
-					+1, color, 1.0)
+				y0 := float32(nh + 1)
+				y1 := yTop
+				switch axis {
+				case 'x':
+					xPlane := x1
+					if dir < 0 {
+						xPlane = x0
+					}
+					if isWater {
+						appendSurfaceSideX(&translucent, xPlane, y0, y1, z0, z1, dir, color, alpha)
+					} else {
+						appendSurfaceSideX(&opaque, xPlane, y0, y1, z0, z1, dir, color, alpha)
+					}
+				case 'z':
+					zPlane := z1
+					if dir < 0 {
+						zPlane = z0
+					}
+					if isWater {
+						appendSurfaceSideZ(&translucent, zPlane, y0, y1, x0, x1, dir, color, alpha)
+					} else {
+						appendSurfaceSideZ(&opaque, zPlane, y0, y1, x0, x1, dir, color, alpha)
+					}
+				}
+			}
+
+			// +X neighbour (cross-sector aware via sampler).
+			{
+				nh, nid := sample(wx+step, wz)
+				if dropWater && nid == IDWater {
+					// Treat water neighbour as ground at sea level for
+					// skirt purposes so far tiers still close the seam.
+					_ = nid
+				}
+				emitSkirt(nh, 'x', +1)
 			}
 			// -X neighbour.
-			if bx-step >= 0 {
-				nh := surf.Heights[bx-step][bz]
-				if nh < h {
-					appendSurfaceSideX(&opaque,
-						float32(baseX+bx),
-						float32(nh+1), float32(h+1),
-						float32(baseZ+bz), float32(baseZ+bz+step),
-						-1, color, 1.0)
-				}
-			} else if nh, ok := neighbourHeight(-1, 0, 15, bz); ok && nh < h {
-				appendSurfaceSideX(&opaque,
-					float32(baseX+bx),
-					float32(nh+1), float32(h+1),
-					float32(baseZ+bz), float32(baseZ+bz+step),
-					-1, color, 1.0)
+			{
+				nh, _ := sample(wx-1, wz)
+				emitSkirt(nh, 'x', -1)
 			}
 			// +Z neighbour.
-			if bz+step < 16 {
-				nh := surf.Heights[bx][bz+step]
-				if nh < h {
-					appendSurfaceSideZ(&opaque,
-						float32(baseZ+bz+step),
-						float32(nh+1), float32(h+1),
-						float32(baseX+bx), float32(baseX+bx+step),
-						+1, color, 1.0)
-				}
-			} else if nh, ok := neighbourHeight(0, 1, bx, 0); ok && nh < h {
-				appendSurfaceSideZ(&opaque,
-					float32(baseZ+bz+step),
-					float32(nh+1), float32(h+1),
-					float32(baseX+bx), float32(baseX+bx+step),
-					+1, color, 1.0)
+			{
+				nh, _ := sample(wx, wz+step)
+				emitSkirt(nh, 'z', +1)
 			}
 			// -Z neighbour.
-			if bz-step >= 0 {
-				nh := surf.Heights[bx][bz-step]
-				if nh < h {
-					appendSurfaceSideZ(&opaque,
-						float32(baseZ+bz),
-						float32(nh+1), float32(h+1),
-						float32(baseX+bx), float32(baseX+bx+step),
-						-1, color, 1.0)
-				}
-			} else if nh, ok := neighbourHeight(0, -1, bx, 15); ok && nh < h {
-				appendSurfaceSideZ(&opaque,
-					float32(baseZ+bz),
-					float32(nh+1), float32(h+1),
-					float32(baseX+bx), float32(baseX+bx+step),
-					-1, color, 1.0)
+			{
+				nh, _ := sample(wx, wz-1)
+				emitSkirt(nh, 'z', -1)
 			}
 		}
 	}
@@ -184,8 +170,8 @@ func appendSurfaceTop(out *[]ChunkVertex, x0, x1, y, z0, z1 float32, color RGBA,
 }
 
 // appendSurfaceSideX emits a skirt quad perpendicular to the X axis at
-// world X = x. dir > 0 means the quad faces +X (the lower neighbour is on
-// the +X side), dir < 0 means it faces -X.
+// world X = x. dir > 0 means the quad faces +X (the lower neighbour is
+// on the +X side), dir < 0 means it faces -X.
 func appendSurfaceSideX(out *[]ChunkVertex, x, y0, y1, z0, z1 float32, dir int, color RGBA, alpha float32) {
 	if y1 <= y0 {
 		return
@@ -242,8 +228,8 @@ func appendSurfaceSideZ(out *[]ChunkVertex, z, y0, y1, x0, x1 float32, dir int, 
 }
 
 // emitTriQuad appends the two triangles of a CCW-wound quad to `out`.
-// Light attributes are fixed to (0, 0, 0, 1) — no block light, full sky
-// light — so distant terrain matches the ambient outdoor look.
+// Light attributes are fixed to (0, 0, 0, 1) — no block light, full
+// sky light — so distant terrain matches the ambient outdoor look.
 func emitTriQuad(out *[]ChunkVertex, v [4][3]float32, n [3]float32, r, g, b, a float32) {
 	mk := func(p [3]float32) ChunkVertex {
 		return ChunkVertex{
