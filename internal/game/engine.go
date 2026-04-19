@@ -8,8 +8,6 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 )
 
-const renderRadiusChunks = 2
-
 // InitRenderer must run after the GL context is current. It loads the block
 // pack, compiles shaders, and initialises GL state.
 func (game *Game) InitRenderer() error {
@@ -40,7 +38,10 @@ func (game *Game) OnFramebufferResize(width, height int) {
 }
 
 func (game *Game) buildProjection() mgl32.Mat4 {
-	return mgl32.Perspective(mgl32.DegToRad(70), game.renderer.aspect, 0.1, 1000)
+	// Far plane extended to cover the LOD macro ring (lodMacroRadius
+	// chunks × 16 blocks ≈ 512 blocks) with comfortable margin so
+	// distant meshes don't get clipped at the horizon.
+	return mgl32.Perspective(mgl32.DegToRad(70), game.renderer.aspect, 0.1, 4096)
 }
 
 // buildView replicates the previous gl.Rotatef / gl.Translatef sequence in
@@ -60,32 +61,32 @@ func (game *Game) buildView() mgl32.Mat4 {
 	return view
 }
 
-// refreshChunkMeshes rebuilds dirty meshes and evicts chunks no longer in the
-// active 3x3 grid. Must run on the GL thread.
+// refreshChunkMeshes rebuilds dirty meshes and evicts chunks no longer in
+// the active LOD 0 square. Also uploads any missing distant-tier meshes so
+// the horizon is populated incrementally as surfaces come in. Must run on
+// the GL thread.
 func (game *Game) refreshChunkMeshes() {
 	r := game.renderer
 
-	active := make(map[Point2D]struct{}, 9)
-	for x := 0; x < 3; x++ {
-		for y := 0; y < 3; y++ {
-			c := game.grid[x][y]
-			if c == nil {
-				continue
-			}
-			active[c.Coordinates] = struct{}{}
+	active := make(map[Point2D]struct{}, len(game.chunks))
+	for coord, c := range game.chunks {
+		active[coord] = struct{}{}
 
-			m, ok := r.meshes[c.Coordinates]
-			if !ok {
-				m = &chunkMesh{dirty: true}
-				r.meshes[c.Coordinates] = m
-			}
-			if m.dirty {
-				opaque, translucent := BuildChunkMesh(c, game.getBlockAt, game.sampleLight)
-				r.uploadMesh(m, opaque, translucent)
-			}
+		m, ok := r.meshes[coord]
+		if !ok {
+			m = &chunkMesh{dirty: true}
+			r.meshes[coord] = m
+		}
+		if m.dirty {
+			opaque, translucent := BuildChunkMesh(c, game.getBlockAt, game.sampleLight)
+			r.uploadMesh(m, opaque, translucent)
 		}
 	}
 	r.evict(active)
+
+	// Distant-tier meshes are pure functions of ChunkSurface, so we just
+	// build one for any surface that doesn't already have a mesh.
+	game.refreshLODMeshes()
 }
 
 func (game *Game) drawScene() {
@@ -108,7 +109,9 @@ func (game *Game) drawScene() {
 	gl.Uniform3f(r.uLightDir, lightDir[0], lightDir[1], lightDir[2])
 	gl.Uniform1f(r.uAmbient, 0.55)
 
-	// Pass 1: opaque geometry writes depth normally.
+	// Pass 1: opaque geometry writes depth normally. LOD 0 chunks render
+	// first (they're closest and overwrite distant meshes cheaply thanks to
+	// the depth test), then the distant-tier meshes fill in the horizon.
 	gl.Disable(gl.BLEND)
 	gl.DepthMask(true)
 	for _, m := range r.meshes {
@@ -117,6 +120,13 @@ func (game *Game) drawScene() {
 		}
 		gl.BindVertexArray(m.opaqueVAO)
 		gl.DrawArrays(gl.TRIANGLES, 0, m.opaqueCount)
+	}
+	for _, m := range r.lodMeshes {
+		if m.count == 0 {
+			continue
+		}
+		gl.BindVertexArray(m.vao)
+		gl.DrawArrays(gl.TRIANGLES, 0, m.count)
 	}
 
 	// Pass 2: translucent geometry blends over the opaque frame, with depth

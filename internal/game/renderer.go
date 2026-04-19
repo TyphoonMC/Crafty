@@ -63,6 +63,14 @@ type chunkMesh struct {
 	dirty          bool
 }
 
+// lodMesh is the distant-tier counterpart to chunkMesh: one opaque vertex
+// stream, no translucent pass (distant water is rendered opaque).
+type lodMesh struct {
+	vao   uint32
+	vbo   uint32
+	count int32
+}
+
 type renderer struct {
 	program uint32
 
@@ -71,6 +79,9 @@ type renderer struct {
 	uAmbient  int32
 
 	meshes map[Point2D]*chunkMesh
+	// lodMeshes holds the distant-tier surface meshes keyed by chunk
+	// coordinate. Populated lazily from Game.surfaces each frame.
+	lodMeshes map[Point2D]*lodMesh
 
 	viewportW int32
 	viewportH int32
@@ -79,8 +90,9 @@ type renderer struct {
 
 func newRenderer() *renderer {
 	return &renderer{
-		meshes: make(map[Point2D]*chunkMesh),
-		aspect: 16.0 / 9.0,
+		meshes:    make(map[Point2D]*chunkMesh),
+		lodMeshes: make(map[Point2D]*lodMesh),
+		aspect:    16.0 / 9.0,
 	}
 }
 
@@ -109,6 +121,10 @@ func (r *renderer) shutdown() {
 		r.freeMesh(m)
 	}
 	r.meshes = nil
+	for _, m := range r.lodMeshes {
+		r.freeLODMesh(m)
+	}
+	r.lodMeshes = nil
 	if r.program != 0 {
 		gl.DeleteProgram(r.program)
 		r.program = 0
@@ -161,6 +177,38 @@ func (r *renderer) evict(active map[Point2D]struct{}) {
 			delete(r.meshes, k)
 		}
 	}
+}
+
+// evictLODMeshes drops distant-tier meshes whose surface entries have been
+// removed (promoted to LOD 0, or scrolled outside the horizon ring).
+func (r *renderer) evictLODMeshes(active map[Point2D]struct{}) {
+	for k, m := range r.lodMeshes {
+		if _, ok := active[k]; !ok {
+			r.freeLODMesh(m)
+			delete(r.lodMeshes, k)
+		}
+	}
+}
+
+// freeLODMesh releases the GL resources owned by a distant-tier mesh.
+func (r *renderer) freeLODMesh(m *lodMesh) {
+	if m == nil {
+		return
+	}
+	if m.vbo != 0 {
+		gl.DeleteBuffers(1, &m.vbo)
+		m.vbo = 0
+	}
+	if m.vao != 0 {
+		gl.DeleteVertexArrays(1, &m.vao)
+		m.vao = 0
+	}
+	m.count = 0
+}
+
+// uploadLODMesh replaces the vertex stream of a distant-tier mesh.
+func (r *renderer) uploadLODMesh(m *lodMesh, verts []ChunkVertex) {
+	m.count = uploadVertexStream(&m.vao, &m.vbo, verts)
 }
 
 // uploadMesh replaces both the opaque and translucent vertex streams for the

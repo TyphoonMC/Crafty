@@ -37,8 +37,21 @@ type Game struct {
 
 	player *Player
 
+	// middle is the chunk coordinate the player currently stands on. LOD 0
+	// chunks load in a (2*lod0Radius+1)² square centred here; distant
+	// surfaces fill out to lodMacroRadius.
 	middle Point2D
-	grid   [3][3]*Chunk
+
+	// chunks holds every LOD 0 chunk keyed by its chunk coordinate. A
+	// lookup is O(1) and works for any radius without special-casing the
+	// old 3x3 grid indices. Entries outside the LOD 0 square are
+	// flushed and deleted by streamChunks.
+	chunks map[Point2D]*Chunk
+
+	// surfaces holds lightweight heightmap summaries for the distant-LOD
+	// ring — chunks that are visible but not close enough to warrant
+	// per-block mesh generation / physics. Keyed the same way as chunks.
+	surfaces map[Point2D]*ChunkSurface
 
 	gen *terrainGen
 
@@ -47,8 +60,10 @@ type Game struct {
 
 func NewGame() *Game {
 	g := Game{
-		player: newPlayer(),
-		middle: Point2D{0, 0},
+		player:   newPlayer(),
+		middle:   Point2D{0, 0},
+		chunks:   make(map[Point2D]*Chunk),
+		surfaces: make(map[Point2D]*ChunkSurface),
 	}
 
 	g.gen = newTerrainGen(189766828)
@@ -76,81 +91,64 @@ func (game *Game) SetGamemode(gm typhoon.Gamemode) {
 	game.player.gamemode = gm
 }
 
+// loadChunks runs the initial streaming pass. It eagerly loads the LOD 0
+// square so the player spawns with immediate ground under their feet, then
+// hands off to streamChunks to schedule the rest over subsequent frames.
+//
+// The eager pass is capped to the full LOD 0 square because we only block
+// here once, at startup. All later streaming uses the budgeted path in
+// streamChunks so movement never stalls the main thread.
 func (game *Game) loadChunks() {
-	for x := 0; x < 3; x++ {
-		for y := 0; y < 3; y++ {
-			game.grid[x][y] = game.loadChunk(Point2D{game.middle.x + x - 1, game.middle.y + y - 1})
+	for dx := -lod0Radius; dx <= lod0Radius; dx++ {
+		for dz := -lod0Radius; dz <= lod0Radius; dz++ {
+			coord := Point2D{game.middle.x + dx, game.middle.y + dz}
+			if _, ok := game.chunks[coord]; ok {
+				continue
+			}
+			game.chunks[coord] = game.loadChunk(coord)
 		}
 	}
+	// Let streamChunks populate the distant surface ring and set up any
+	// bookkeeping both maps share.
+	game.streamChunks()
 }
 
-// UnloadChunks flushes all in-memory chunks to disk. Safe to call from the
-// main thread at shutdown.
+// UnloadChunks flushes all in-memory LOD 0 chunks to disk. Safe to call
+// from the main thread at shutdown. Distant surfaces are discarded without
+// serialization — they are deterministic and can be recomputed from the
+// terrain generator.
 func (game *Game) UnloadChunks() {
 	game.mu.Lock()
 	defer game.mu.Unlock()
-	for x := 0; x < 3; x++ {
-		for y := 0; y < 3; y++ {
-			if game.grid[x][y] != nil {
-				game.saveChunk(game.grid[x][y])
-			}
-		}
+	for _, c := range game.chunks {
+		game.saveChunk(c)
 	}
+	game.chunks = make(map[Point2D]*Chunk)
+	game.surfaces = make(map[Point2D]*ChunkSurface)
 }
 
+// newMiddle is called whenever the player crosses a chunk boundary.
+// Recomputes the LOD 0 / surface rings relative to the new origin.
 func (game *Game) newMiddle(coord Point2D) {
 	log.Println("new middle", coord)
 	game.middle = coord
-
-	cache := make([]*Chunk, 0, 9)
-	for x := 0; x < 3; x++ {
-		for y := 0; y < 3; y++ {
-			cache = append(cache, game.grid[x][y])
-		}
-	}
-
-	reused := make([]bool, len(cache))
-
-	for x := 0; x < 3; x++ {
-		for y := 0; y < 3; y++ {
-			wantX := game.middle.x + x - 1
-			wantY := game.middle.y + y - 1
-			index, chk := game.getChunkIn(wantX, wantY, cache)
-			if chk != nil {
-				game.grid[x][y] = chk
-				reused[index] = true
-			} else {
-				game.grid[x][y] = game.loadChunk(Point2D{wantX, wantY})
-			}
-		}
-	}
-
-	for i, used := range reused {
-		if !used && cache[i] != nil {
-			game.saveChunk(cache[i])
-		}
-	}
+	game.streamChunks()
 }
 
-func (game *Game) getChunkIn(x, z int, cache []*Chunk) (int, *Chunk) {
-	for i, c := range cache {
-		if c == nil {
-			continue
-		}
-		if c.Coordinates.x == x && c.Coordinates.y == z {
-			return i, c
-		}
-	}
-	return -1, nil
-}
-
+// getChunk returns the LOD 0 chunk containing world chunk (x, z), or nil
+// when the chunk is not currently loaded. If `force` is true and the
+// chunk isn't loaded, it's fetched from disk (or generated) immediately
+// and added to the map — used by world-editing paths that need to mutate
+// a neighbouring chunk's block data.
 func (game *Game) getChunk(x, z int, force bool) *Chunk {
-	if x >= game.middle.x-1 && x <= game.middle.x+1 &&
-		z >= game.middle.y-1 && z <= game.middle.y+1 {
-		return game.grid[x-game.middle.x+1][z-game.middle.y+1]
+	coord := Point2D{x, z}
+	if c, ok := game.chunks[coord]; ok {
+		return c
 	}
 	if force {
-		return game.loadChunk(Point2D{x, z})
+		c := game.loadChunk(coord)
+		game.chunks[coord] = c
+		return c
 	}
 	return nil
 }
