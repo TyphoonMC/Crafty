@@ -42,11 +42,7 @@ func BuildSectorMesh(sectorCoord Point2D, tier int, sample lodSampler) (opaque, 
 	// Coarse sector means fewer cells; allocate a small starting capacity.
 	cells := (sectorBlocks / step) * (sectorBlocks / step)
 	opaque = make([]ChunkVertex, 0, cells*6)
-	if tier < 3 {
-		translucent = make([]ChunkVertex, 0, cells)
-	}
-
-	dropWater := tier >= 3
+	translucent = make([]ChunkVertex, 0, cells)
 
 	// Iterate sector-local block coordinates in steps. The sampler is
 	// called once per cell plus once per neighbouring cell for skirts;
@@ -58,9 +54,6 @@ func BuildSectorMesh(sectorCoord Point2D, tier int, sample lodSampler) (opaque, 
 			wz := baseZ + bz
 			h, id := sample(wx, wz)
 			if id == IDAir {
-				continue
-			}
-			if dropWater && id == IDWater {
 				continue
 			}
 
@@ -125,29 +118,24 @@ func BuildSectorMesh(sectorCoord Point2D, tier int, sample lodSampler) (opaque, 
 				}
 			}
 
-			// +X neighbour (cross-sector aware via sampler).
+			// Neighbour cells are sampled at their cell ORIGIN (step away),
+			// not at wx-1 / wz-1 which reads inside the current cell's
+			// neighbour instead of at its grid corner. Using the step
+			// matches the cell-aligned sampling pattern.
 			{
-				nh, nid := sample(wx+step, wz)
-				if dropWater && nid == IDWater {
-					// Treat water neighbour as ground at sea level for
-					// skirt purposes so far tiers still close the seam.
-					_ = nid
-				}
+				nh, _ := sample(wx+step, wz)
 				emitSkirt(nh, 'x', +1)
 			}
-			// -X neighbour.
 			{
-				nh, _ := sample(wx-1, wz)
+				nh, _ := sample(wx-step, wz)
 				emitSkirt(nh, 'x', -1)
 			}
-			// +Z neighbour.
 			{
 				nh, _ := sample(wx, wz+step)
 				emitSkirt(nh, 'z', +1)
 			}
-			// -Z neighbour.
 			{
-				nh, _ := sample(wx, wz-1)
+				nh, _ := sample(wx, wz-step)
 				emitSkirt(nh, 'z', -1)
 			}
 		}
