@@ -1,24 +1,92 @@
 package game
 
-// ChunkVertex is one vertex of the chunk mesh. Layout: 9 floats, 36 bytes.
+// ChunkVertex is one vertex of the chunk mesh. Layout: 10 floats, 40 bytes.
+// The trailing A channel lets the translucent pass shade water/leaves with
+// the per-block alpha loaded from the resource pack.
 type ChunkVertex struct {
 	X, Y, Z    float32
 	Nx, Ny, Nz float32
-	R, G, B    float32
+	R, G, B, A float32
 }
 
-// BuildChunkMesh greedy-meshes a chunk using `blockAt` for neighbour queries
-// (which seamlessly handles cross-chunk boundaries). All default blocks are
-// currently rendered as full cubes in their dominant palette colour.
-func BuildChunkMesh(chunk *Chunk, blockAt func(x, y, z int) uint8) []ChunkVertex {
+// blockIsOpaque reports whether a neighbour of the given id should fully
+// occlude a face. Out-of-table ids behave like air (not opaque). Kept as a
+// hot-path helper for the greedy mesher below.
+func blockIsOpaque(id uint8) bool {
+	if int(id) >= len(blocks) {
+		return false
+	}
+	return blocks[id].Opaque
+}
+
+// blockIsTranslucent reports whether the block draws geometry with alpha < 1.
+func blockIsTranslucent(id uint8) bool {
+	if int(id) >= len(blocks) {
+		return false
+	}
+	return blocks[id].Translucent
+}
+
+// faceVisible decides whether the face of block A (id `a`) pointing at
+// neighbour B (id `b`) should be emitted, and whether it belongs in the opaque
+// or translucent bucket. Encodes the rule table from the task brief:
+//
+//   - A transparent: never draw (caller already filters)
+//   - B transparent / out-of-world: draw
+//   - A opaque, B opaque: cull
+//   - A opaque, B translucent: draw to opaque
+//   - A translucent, B opaque: cull
+//   - A translucent, B translucent, same id: cull (shared inner surface)
+//   - A translucent, B translucent, different id: draw to translucent
+func faceVisible(a, b uint8) (draw bool, translucent bool) {
+	aInfo := Block(a)
+	if aInfo == nil || aInfo.Transparent {
+		return false, false
+	}
+	aTrans := aInfo.Translucent
+	aOpaque := aInfo.Opaque
+
+	// Neighbour transparent (air / glass-like) or out of the world.
+	if IsBlockTransparent(b) {
+		return true, aTrans
+	}
+
+	bOpaque := blockIsOpaque(b)
+	bTrans := blockIsTranslucent(b)
+
+	if aOpaque {
+		if bOpaque {
+			return false, false
+		}
+		// Neighbour translucent → draw A's opaque face.
+		return true, false
+	}
+
+	// A translucent.
+	if bOpaque {
+		return false, false
+	}
+	if bTrans && a == b {
+		return false, false
+	}
+	return true, true
+}
+
+// BuildChunkMesh greedy-meshes a chunk and returns two vertex slices: the
+// opaque geometry (drawn with depth write) and the translucent geometry (drawn
+// afterwards with blending). `blockAt` seamlessly handles cross-chunk
+// neighbour queries.
+func BuildChunkMesh(chunk *Chunk, blockAt func(x, y, z int) uint8) (opaque, translucent []ChunkVertex) {
 	baseX := chunk.Coordinates.x << 4
 	baseZ := chunk.Coordinates.y << 4
 
 	const maxPlane = worldHeight * 16 // largest slice plane area
 	mask := make([]uint8, maxPlane)
+	maskTrans := make([]bool, maxPlane)
 	visited := make([]bool, maxPlane)
 
-	verts := make([]ChunkVertex, 0, 2048)
+	opaque = make([]ChunkVertex, 0, 2048)
+	translucent = make([]ChunkVertex, 0, 256)
 
 	for face := 0; face < 6; face++ {
 		axis, sliceCount, aMax, bMax := faceDims(face)
@@ -28,6 +96,7 @@ func BuildChunkMesh(chunk *Chunk, blockAt func(x, y, z int) uint8) []ChunkVertex
 			area := aMax * bMax
 			for i := 0; i < area; i++ {
 				mask[i] = 0
+				maskTrans[i] = false
 				visited[i] = false
 			}
 
@@ -35,13 +104,14 @@ func BuildChunkMesh(chunk *Chunk, blockAt func(x, y, z int) uint8) []ChunkVertex
 				for b := 0; b < bMax; b++ {
 					lx, ly, lz := meshLocalCoords(axis, s, a, b)
 					id := blockAt(baseX+lx, ly, baseZ+lz)
-					if IsBlockTransparent(id) {
-						continue
-					}
-					if !IsBlockTransparent(blockAt(baseX+lx+dir.x, ly+dir.y, baseZ+lz+dir.z)) {
+					nid := blockAt(baseX+lx+dir.x, ly+dir.y, baseZ+lz+dir.z)
+
+					draw, trans := faceVisible(id, nid)
+					if !draw {
 						continue
 					}
 					mask[a*bMax+b] = id
+					maskTrans[a*bMax+b] = trans
 				}
 			}
 
@@ -52,11 +122,12 @@ func BuildChunkMesh(chunk *Chunk, blockAt func(x, y, z int) uint8) []ChunkVertex
 						continue
 					}
 					id := mask[idx]
+					trans := maskTrans[idx]
 
 					w := 1
 					for b+w < bMax {
 						i := a*bMax + b + w
-						if mask[i] != id || visited[i] {
+						if mask[i] != id || maskTrans[i] != trans || visited[i] {
 							break
 						}
 						w++
@@ -67,7 +138,7 @@ func BuildChunkMesh(chunk *Chunk, blockAt func(x, y, z int) uint8) []ChunkVertex
 						ok := true
 						for db := 0; db < w; db++ {
 							i := (a+h)*bMax + b + db
-							if mask[i] != id || visited[i] {
+							if mask[i] != id || maskTrans[i] != trans || visited[i] {
 								ok = false
 								break
 							}
@@ -88,12 +159,16 @@ func BuildChunkMesh(chunk *Chunk, blockAt func(x, y, z int) uint8) []ChunkVertex
 					if info == nil {
 						continue
 					}
-					verts = appendQuad(verts, face, s, a, b, h, w, baseX, baseZ, info.Color)
+					if trans {
+						translucent = appendQuad(translucent, face, s, a, b, h, w, baseX, baseZ, info.Color, info.Alpha)
+					} else {
+						opaque = appendQuad(opaque, face, s, a, b, h, w, baseX, baseZ, info.Color, 1.0)
+					}
 				}
 			}
 		}
 	}
-	return verts
+	return opaque, translucent
 }
 
 // faceDims returns the sweep axis, slice count and 2D plane dimensions (aMax,
@@ -123,8 +198,9 @@ func meshLocalCoords(axis, s, a, b int) (x, y, z int) {
 }
 
 // appendQuad emits two triangles (6 vertices) for a greedy-merged rectangle,
-// preserving CCW winding from the outside of the block.
-func appendQuad(verts []ChunkVertex, face, s, a0, b0, h, w, baseX, baseZ int, color RGBA) []ChunkVertex {
+// preserving CCW winding from the outside of the block. The per-vertex alpha
+// comes from the block's runtime metadata (1.0 for opaque, <1 for translucent).
+func appendQuad(verts []ChunkVertex, face, s, a0, b0, h, w, baseX, baseZ int, color RGBA, alpha float32) []ChunkVertex {
 	fa0 := float32(a0)
 	fa1 := float32(a0 + h)
 	fb0 := float32(b0)
@@ -195,7 +271,7 @@ func appendQuad(verts []ChunkVertex, face, s, a0, b0, h, w, baseX, baseZ int, co
 		return ChunkVertex{
 			X: p[0], Y: p[1], Z: p[2],
 			Nx: n[0], Ny: n[1], Nz: n[2],
-			R: r, G: g, B: bcol,
+			R: r, G: g, B: bcol, A: alpha,
 		}
 	}
 	verts = append(verts, mk(v[0]), mk(v[1]), mk(v[2]))

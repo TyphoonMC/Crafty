@@ -80,8 +80,8 @@ func (game *Game) refreshChunkMeshes() {
 				r.meshes[c.Coordinates] = m
 			}
 			if m.dirty {
-				verts := BuildChunkMesh(c, game.getBlockAt)
-				r.uploadMesh(m, verts)
+				opaque, translucent := BuildChunkMesh(c, game.getBlockAt)
+				r.uploadMesh(m, opaque, translucent)
 			}
 		}
 	}
@@ -108,13 +108,33 @@ func (game *Game) drawScene() {
 	gl.Uniform3f(r.uLightDir, lightDir[0], lightDir[1], lightDir[2])
 	gl.Uniform1f(r.uAmbient, 0.55)
 
+	// Pass 1: opaque geometry writes depth normally.
+	gl.Disable(gl.BLEND)
+	gl.DepthMask(true)
 	for _, m := range r.meshes {
-		if m.count == 0 {
+		if m.opaqueCount == 0 {
 			continue
 		}
-		gl.BindVertexArray(m.vao)
-		gl.DrawArrays(gl.TRIANGLES, 0, m.count)
+		gl.BindVertexArray(m.opaqueVAO)
+		gl.DrawArrays(gl.TRIANGLES, 0, m.opaqueCount)
 	}
+
+	// Pass 2: translucent geometry blends over the opaque frame, with depth
+	// testing enabled but depth writes off (standard translucent trick so
+	// overlapping translucent fragments don't fight each other).
+	gl.Enable(gl.BLEND)
+	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+	gl.DepthMask(false)
+	for _, m := range r.meshes {
+		if m.translucentCount == 0 {
+			continue
+		}
+		gl.BindVertexArray(m.translucentVAO)
+		gl.DrawArrays(gl.TRIANGLES, 0, m.translucentCount)
+	}
+	gl.DepthMask(true)
+	gl.Disable(gl.BLEND)
+
 	gl.BindVertexArray(0)
 }
 
@@ -126,9 +146,8 @@ func (game *Game) MainLoop() {
 	s := time.Now().UnixNano()
 
 	game.mu.Lock()
-	game.calculateVelocity()
-	game.calculateGravity()
 	game.inputLoop()
+	game.updatePhysics()
 	game.drawScene()
 	game.mu.Unlock()
 

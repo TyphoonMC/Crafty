@@ -9,6 +9,12 @@ type Player struct {
 	cameraSpeed float32
 	velocity    FPoint3D
 	gamemode    typhoon.Gamemode
+
+	// Physics state (survival mode only).
+	onGround   bool
+	wishDirX   float32
+	wishDirZ   float32
+	wantsJump  bool
 }
 
 func newPlayer() *Player {
@@ -19,12 +25,9 @@ func newPlayer() *Player {
 		cameraSpeed: 0.2,
 		velocity:    FPoint3D{0, 0, 0},
 		gamemode:    typhoon.SURVIVAL,
+		onGround:    false,
+		wishDirX:    0,
+		wishDirZ:    0,
+		wantsJump:   false,
 	}
-}
-
-func (game *Game) calculateVelocity() {
-	game.player.pos.x += game.player.velocity.x
-	game.player.pos.y += game.player.velocity.y
-	game.player.pos.z += game.player.velocity.z
-	FMultiply(&game.player.velocity, .9)
 }

@@ -87,37 +87,6 @@ func (game *Game) checkKey(key glfw.Key) bool {
 	return game.win.GetKey(key) == 1
 }
 
-func (game *Game) movePlayer(rot float32) {
-	x := math.Sin(float64(toRadian32(-game.player.rot.y + rot)))
-	y := math.Cos(float64(toRadian32(-game.player.rot.y + rot)))
-
-	nPos := FPoint3D{game.player.pos.x, game.player.pos.y, game.player.pos.z}
-	nPos.x += float32(x) * game.player.speed
-	nPos.z += float32(y) * game.player.speed
-
-	nPosInt := FtoPoint3D(&nPos)
-	posInt := FtoPoint3D(&game.player.pos)
-
-	if game.getBlockAt(nPosInt.x, nPosInt.y, nPosInt.z) != 0 &&
-		game.player.gamemode != typhoon.SPECTATOR {
-		if nPosInt.x != posInt.x {
-			nPos.x = game.player.pos.x
-		}
-		if nPosInt.z != posInt.z {
-			nPos.z = game.player.pos.z
-		}
-	}
-
-	game.player.pos = nPos
-
-	chkX := floorInt(game.player.pos.x) >> 4
-	chkY := floorInt(game.player.pos.z) >> 4
-
-	if chkX != game.middle.x || chkY != game.middle.y {
-		game.newMiddle(Point2D{chkX, chkY})
-	}
-}
-
 // TeleportPlayer safely teleports the player from another goroutine.
 func (game *Game) TeleportPlayer(x, y, z float32) {
 	game.mu.Lock()
@@ -130,6 +99,7 @@ func (game *Game) teleportPlayerLocked(x, y, z float32) {
 	game.player.pos.y = y
 	game.player.pos.z = z
 	game.player.velocity = FPoint3D{}
+	game.player.onGround = false
 
 	chkX := floorInt(game.player.pos.x) >> 4
 	chkY := floorInt(game.player.pos.z) >> 4
@@ -140,36 +110,67 @@ func (game *Game) teleportPlayerLocked(x, y, z float32) {
 }
 
 func (game *Game) inputLoop() {
-	s := game.player.speed
-	if game.checkKey(glfw.KeyUp) || game.checkKey(glfw.KeyW) {
-		game.movePlayer(180)
+	// Reset per-frame intent flags so released keys stop driving motion.
+	game.player.wishDirX = 0
+	game.player.wishDirZ = 0
+	game.player.wantsJump = false
+
+	var dForward, dRight float32
+	if game.checkKey(glfw.KeyW) || game.checkKey(glfw.KeyUp) {
+		dForward += 1
 	}
-	if game.checkKey(glfw.KeyDown) || game.checkKey(glfw.KeyS) {
-		game.movePlayer(0)
+	if game.checkKey(glfw.KeyS) || game.checkKey(glfw.KeyDown) {
+		dForward -= 1
 	}
-	if game.checkKey(glfw.KeyLeft) || game.checkKey(glfw.KeyA) {
-		game.movePlayer(-90)
+	if game.checkKey(glfw.KeyD) || game.checkKey(glfw.KeyRight) {
+		dRight += 1
 	}
-	if game.checkKey(glfw.KeyRight) || game.checkKey(glfw.KeyD) {
-		game.movePlayer(90)
+	if game.checkKey(glfw.KeyA) || game.checkKey(glfw.KeyLeft) {
+		dRight -= 1
 	}
 
-	if game.checkKey(glfw.KeyN) {
-		loc := game.player.pos
-		loc.y -= 1
-		c, b := game.getChunkBlockAt(floorInt(loc.x), floorInt(loc.y), floorInt(loc.z))
-		log.Println(game.isOnGround(&game.player.pos), game.getBlockAtF(&loc), c, b, game.player.pos, game.player.rot)
+	// Project input onto the XZ plane using player yaw. With rot.y=0 the
+	// forward key should push along -Z (matching the view-matrix basis used
+	// by buildView and the old movePlayer yaw math).
+	yaw := float64(toRadian32(game.player.rot.y))
+	sinY := float32(math.Sin(yaw))
+	cosY := float32(math.Cos(yaw))
+	wishX := sinY*dForward + cosY*dRight
+	wishZ := -cosY*dForward + sinY*dRight
+	mag := math.Sqrt(float64(wishX*wishX + wishZ*wishZ))
+	if mag > 1 {
+		wishX /= float32(mag)
+		wishZ /= float32(mag)
 	}
+	game.player.wishDirX = wishX
+	game.player.wishDirZ = wishZ
 
 	if game.player.gamemode == typhoon.CREATIVE ||
 		game.player.gamemode == typhoon.SPECTATOR {
+		// Creative/spectator: direct position move, no physics.
+		s := game.player.speed
+		game.player.pos.x += wishX * s
+		game.player.pos.z += wishZ * s
 		if game.checkKey(glfw.KeySpace) {
 			game.player.pos.y += s
 		}
 		if game.checkKey(glfw.KeyLeftShift) {
 			game.player.pos.y -= s
 		}
-	} else if game.checkKey(glfw.KeySpace) && game.isOnGround(&game.player.pos) {
-		game.player.velocity = FPoint3D{0, .6, 0}
+
+		chkX := floorInt(game.player.pos.x) >> 4
+		chkY := floorInt(game.player.pos.z) >> 4
+		if chkX != game.middle.x || chkY != game.middle.y {
+			game.newMiddle(Point2D{chkX, chkY})
+		}
+	} else {
+		game.player.wantsJump = game.checkKey(glfw.KeySpace)
+	}
+
+	if game.checkKey(glfw.KeyN) {
+		loc := game.player.pos
+		loc.y -= 1
+		c, b := game.getChunkBlockAt(floorInt(loc.x), floorInt(loc.y), floorInt(loc.z))
+		log.Println(game.player.onGround, game.getBlockAtF(&loc), c, b, game.player.pos, game.player.rot)
 	}
 }

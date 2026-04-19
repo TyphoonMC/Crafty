@@ -12,13 +12,13 @@ const chunkVertexSize = int32(unsafe.Sizeof(ChunkVertex{}))
 const vertexShaderSrc = `#version 330 core
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aNormal;
-layout (location = 2) in vec3 aColor;
+layout (location = 2) in vec4 aColor;
 
 uniform mat4 uMVP;
 uniform vec3 uLightDir;
 uniform float uAmbient;
 
-out vec3 vColor;
+out vec4 vColor;
 out float vBrightness;
 
 void main() {
@@ -30,21 +30,24 @@ void main() {
 `
 
 const fragmentShaderSrc = `#version 330 core
-in vec3 vColor;
+in vec4 vColor;
 in float vBrightness;
 
 out vec4 FragColor;
 
 void main() {
-    FragColor = vec4(vColor * vBrightness, 1.0);
+    FragColor = vec4(vColor.rgb * vBrightness, vColor.a);
 }
 `
 
 type chunkMesh struct {
-	vao     uint32
-	vbo     uint32
-	count   int32
-	dirty   bool
+	opaqueVAO      uint32
+	opaqueVBO      uint32
+	opaqueCount    int32
+	translucentVAO uint32
+	translucentVBO uint32
+	translucentCount int32
+	dirty          bool
 }
 
 type renderer struct {
@@ -100,12 +103,24 @@ func (r *renderer) shutdown() {
 }
 
 func (r *renderer) freeMesh(m *chunkMesh) {
-	if m.vbo != 0 {
-		gl.DeleteBuffers(1, &m.vbo)
+	if m.opaqueVBO != 0 {
+		gl.DeleteBuffers(1, &m.opaqueVBO)
+		m.opaqueVBO = 0
 	}
-	if m.vao != 0 {
-		gl.DeleteVertexArrays(1, &m.vao)
+	if m.opaqueVAO != 0 {
+		gl.DeleteVertexArrays(1, &m.opaqueVAO)
+		m.opaqueVAO = 0
 	}
+	if m.translucentVBO != 0 {
+		gl.DeleteBuffers(1, &m.translucentVBO)
+		m.translucentVBO = 0
+	}
+	if m.translucentVAO != 0 {
+		gl.DeleteVertexArrays(1, &m.translucentVAO)
+		m.translucentVAO = 0
+	}
+	m.opaqueCount = 0
+	m.translucentCount = 0
 }
 
 func (r *renderer) setViewport(w, h int) {
@@ -135,34 +150,46 @@ func (r *renderer) evict(active map[Point2D]struct{}) {
 	}
 }
 
-func (r *renderer) uploadMesh(m *chunkMesh, verts []ChunkVertex) {
-	if m.vao == 0 {
-		gl.GenVertexArrays(1, &m.vao)
-		gl.GenBuffers(1, &m.vbo)
-		gl.BindVertexArray(m.vao)
-		gl.BindBuffer(gl.ARRAY_BUFFER, m.vbo)
+// uploadMesh replaces both the opaque and translucent vertex streams for the
+// given chunk. Each stream owns its own VAO+VBO; the attribute layout is
+// identical so shader binding is shared between the two passes.
+func (r *renderer) uploadMesh(m *chunkMesh, opaque, translucent []ChunkVertex) {
+	m.opaqueCount = uploadVertexStream(&m.opaqueVAO, &m.opaqueVBO, opaque)
+	m.translucentCount = uploadVertexStream(&m.translucentVAO, &m.translucentVBO, translucent)
+	m.dirty = false
+}
+
+// uploadVertexStream lazily creates a VAO/VBO pair and uploads the given
+// vertex slice to it. Returns the final vertex count (0 when verts is empty).
+func uploadVertexStream(vao, vbo *uint32, verts []ChunkVertex) int32 {
+	if *vao == 0 {
+		gl.GenVertexArrays(1, vao)
+		gl.GenBuffers(1, vbo)
+		gl.BindVertexArray(*vao)
+		gl.BindBuffer(gl.ARRAY_BUFFER, *vbo)
 
 		gl.VertexAttribPointerWithOffset(0, 3, gl.FLOAT, false, chunkVertexSize, 0)
 		gl.EnableVertexAttribArray(0)
 		gl.VertexAttribPointerWithOffset(1, 3, gl.FLOAT, false, chunkVertexSize, 3*4)
 		gl.EnableVertexAttribArray(1)
-		gl.VertexAttribPointerWithOffset(2, 3, gl.FLOAT, false, chunkVertexSize, 6*4)
+		gl.VertexAttribPointerWithOffset(2, 4, gl.FLOAT, false, chunkVertexSize, 6*4)
 		gl.EnableVertexAttribArray(2)
 	} else {
-		gl.BindVertexArray(m.vao)
-		gl.BindBuffer(gl.ARRAY_BUFFER, m.vbo)
+		gl.BindVertexArray(*vao)
+		gl.BindBuffer(gl.ARRAY_BUFFER, *vbo)
 	}
 
-	m.count = int32(len(verts))
-	if m.count == 0 {
+	count := int32(len(verts))
+	if count == 0 {
+		// Orphan any existing data so we don't keep stale geometry alive.
+		gl.BufferData(gl.ARRAY_BUFFER, 0, nil, gl.STATIC_DRAW)
 		gl.BindBuffer(gl.ARRAY_BUFFER, 0)
 		gl.BindVertexArray(0)
-		m.dirty = false
-		return
+		return 0
 	}
 
-	gl.BufferData(gl.ARRAY_BUFFER, int(m.count)*int(chunkVertexSize), gl.Ptr(verts), gl.STATIC_DRAW)
+	gl.BufferData(gl.ARRAY_BUFFER, int(count)*int(chunkVertexSize), gl.Ptr(verts), gl.STATIC_DRAW)
 	gl.BindBuffer(gl.ARRAY_BUFFER, 0)
 	gl.BindVertexArray(0)
-	m.dirty = false
+	return count
 }

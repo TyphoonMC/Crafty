@@ -24,6 +24,7 @@ const (
 	BlockFlagTransparent uint8 = 1 << 0
 	BlockFlagEmissive    uint8 = 1 << 1
 	BlockFlagSolid       uint8 = 1 << 2
+	BlockFlagTranslucent uint8 = 1 << 3
 )
 
 type RGBA struct {

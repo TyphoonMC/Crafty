@@ -25,12 +25,12 @@ var defaultBlocks = []blockSpec{
 	{name: "grass_top", color: rgb(0xA8, 0xD8, 0x8A), flags: game.BlockFlagSolid},    // 4
 	{name: "debug", color: rgb(0xFF, 0x00, 0xFF), flags: game.BlockFlagSolid},        // 5
 	{name: "sand", color: rgb(0xE8, 0xD5, 0xA8), flags: game.BlockFlagSolid},         // 6
-	{name: "water", color: rgb(0x9B, 0xC4, 0xE2), flags: game.BlockFlagSolid},        // 7
-	{name: "snow", color: rgb(0xF0, 0xEE, 0xE8), flags: game.BlockFlagSolid},         // 8
-	{name: "wood_oak", color: rgb(0xC9, 0xA5, 0x74), flags: game.BlockFlagSolid},     // 9
-	{name: "wood_pine", color: rgb(0xA5, 0x81, 0x68), flags: game.BlockFlagSolid},    // 10
-	{name: "leaves_oak", color: rgb(0x96, 0xB8, 0x7A), flags: game.BlockFlagSolid},   // 11
-	{name: "leaves_cherry", color: rgb(0xF4, 0xC2, 0xD0), flags: game.BlockFlagSolid}, // 12
+	{name: "water", color: rgb(0x9B, 0xC4, 0xE2), flags: game.BlockFlagTranslucent},                        // 7
+	{name: "snow", color: rgb(0xF0, 0xEE, 0xE8), flags: game.BlockFlagSolid},                               // 8
+	{name: "wood_oak", color: rgb(0xC9, 0xA5, 0x74), flags: game.BlockFlagSolid},                           // 9
+	{name: "wood_pine", color: rgb(0xA5, 0x81, 0x68), flags: game.BlockFlagSolid},                          // 10
+	{name: "leaves_oak", color: rgb(0x96, 0xB8, 0x7A), flags: game.BlockFlagSolid | game.BlockFlagTranslucent},   // 11
+	{name: "leaves_cherry", color: rgb(0xF4, 0xC2, 0xD0), flags: game.BlockFlagSolid | game.BlockFlagTranslucent}, // 12
 	{name: "stone_mossy", color: rgb(0x88, 0xA0, 0x6C), flags: game.BlockFlagSolid},  // 13
 	{name: "clay", color: rgb(0xD4, 0xA0, 0x88), flags: game.BlockFlagSolid},         // 14
 }
