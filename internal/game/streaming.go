@@ -129,20 +129,20 @@ func (game *Game) refreshLODMeshes() {
 			continue
 		}
 		coord := coord
-		verts := BuildSurfaceMesh(surf, distantLODStep, func(dx, dz int) *ChunkSurface {
+		opaque, translucent := BuildSurfaceMesh(surf, distantLODStep, func(dx, dz int) *ChunkSurface {
 			nb := Point2D{coord.x + dx, coord.y + dz}
 			if s, ok := game.surfaces[nb]; ok {
 				return s
 			}
-			// Also fall back to LOD 0 chunk heights if the neighbour is a full chunk.
-			// Compute a surface on the fly (just noise — cheap) if LOD 0 exists.
+			// Fall back to LOD 0 chunk heights if the neighbour is a full
+			// chunk — computeSurface is pure noise so it's cheap.
 			if _, ok := game.chunks[nb]; ok {
 				return game.gen.computeSurface(nb)
 			}
 			return nil
 		})
 		m := &lodMesh{}
-		r.uploadLODMesh(m, verts)
+		r.uploadLODMesh(m, opaque, translucent)
 		r.lodMeshes[coord] = m
 	}
 }

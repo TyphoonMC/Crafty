@@ -10,13 +10,18 @@ package game
 // neighbour column is lower) is emitted — no bottom, no back-side faces
 // between adjacent columns.
 //
-// The mesh is always opaque and sits in a single vertex stream. Per-vertex
-// light is the ambient-outdoor fallback: no block light, full sky light,
-// so the shared chunk shader lights the distant terrain correctly without
-// needing a second program.
-func BuildSurfaceMesh(surf *ChunkSurface, lod int, neighbour func(dx, dz int) *ChunkSurface) []ChunkVertex {
+// The mesh is split into two vertex streams: `opaque` for solid terrain
+// (grass, stone, snow…) and `translucent` for water tops. Per-vertex light
+// is the ambient-outdoor fallback: no block light, full sky light, so the
+// shared chunk shader lights the distant terrain correctly without needing
+// a second program.
+//
+// `neighbour(dx, dz)` resolves a neighbouring chunk surface so skirts can
+// be emitted across chunk boundaries, eliminating visible gaps at the
+// distant-tier seams.
+func BuildSurfaceMesh(surf *ChunkSurface, lod int, neighbour func(dx, dz int) *ChunkSurface) (opaque, translucent []ChunkVertex) {
 	if surf == nil {
-		return nil
+		return nil, nil
 	}
 	step := 1 << lod
 	if step < 1 {
@@ -29,7 +34,8 @@ func BuildSurfaceMesh(surf *ChunkSurface, lod int, neighbour func(dx, dz int) *C
 	baseX := surf.Coordinates.x << 4
 	baseZ := surf.Coordinates.y << 4
 
-	verts := make([]ChunkVertex, 0, 64)
+	opaque = make([]ChunkVertex, 0, 64)
+	translucent = make([]ChunkVertex, 0, 16)
 
 	// neighbourHeight fetches the height of the column at local coordinates
 	// (nbx, nbz) inside the neighbour chunk at offset (dx, dz). Returns
@@ -61,14 +67,22 @@ func BuildSurfaceMesh(surf *ChunkSurface, lod int, neighbour func(dx, dz int) *C
 				continue
 			}
 			color := info.Color
-			// Distant water: keep it opaque for a simpler pipeline, with the
-			// translucent palette entry baked to full alpha.
-			alpha := float32(1.0)
 
-			appendSurfaceTop(&verts, float32(baseX+bx), float32(baseX+bx+step),
+			// Route water tops into the translucent stream so they match
+			// the LOD 0 water alpha (0.55, see defaultBlockAlpha). Solid
+			// terrain stays opaque at alpha 1.
+			isWater := id == IDWater
+			topAlpha := float32(1.0)
+			topOut := &opaque
+			if isWater {
+				topAlpha = 0.55
+				topOut = &translucent
+			}
+
+			appendSurfaceTop(topOut, float32(baseX+bx), float32(baseX+bx+step),
 				float32(h+1),
 				float32(baseZ+bz), float32(baseZ+bz+step),
-				color, alpha)
+				color, topAlpha)
 
 			// Side skirts towards lower neighbours. Intra-chunk cells look
 			// at the adjacent column in the same surface; cells at the
@@ -76,77 +90,83 @@ func BuildSurfaceMesh(surf *ChunkSurface, lod int, neighbour func(dx, dz int) *C
 			// the `neighbour` closure so skirts are emitted across chunk
 			// boundaries too.
 			//
+			// Skirts always go into the opaque stream: they're emitted for
+			// the current column's terrain face, not for the (potentially
+			// water) neighbour below. Water columns sit at sea level and
+			// never have a lower neighbour within the same chunk, so they
+			// don't produce skirts in practice.
+			//
 			// +X neighbour.
 			if bx+step < 16 {
 				nh := surf.Heights[bx+step][bz]
 				if nh < h {
-					appendSurfaceSideX(&verts,
+					appendSurfaceSideX(&opaque,
 						float32(baseX+bx+step),
 						float32(nh+1), float32(h+1),
 						float32(baseZ+bz), float32(baseZ+bz+step),
-						+1, color, alpha)
+						+1, color, 1.0)
 				}
 			} else if nh, ok := neighbourHeight(1, 0, 0, bz); ok && nh < h {
-				appendSurfaceSideX(&verts,
+				appendSurfaceSideX(&opaque,
 					float32(baseX+bx+step),
 					float32(nh+1), float32(h+1),
 					float32(baseZ+bz), float32(baseZ+bz+step),
-					+1, color, alpha)
+					+1, color, 1.0)
 			}
 			// -X neighbour.
 			if bx-step >= 0 {
 				nh := surf.Heights[bx-step][bz]
 				if nh < h {
-					appendSurfaceSideX(&verts,
+					appendSurfaceSideX(&opaque,
 						float32(baseX+bx),
 						float32(nh+1), float32(h+1),
 						float32(baseZ+bz), float32(baseZ+bz+step),
-						-1, color, alpha)
+						-1, color, 1.0)
 				}
 			} else if nh, ok := neighbourHeight(-1, 0, 15, bz); ok && nh < h {
-				appendSurfaceSideX(&verts,
+				appendSurfaceSideX(&opaque,
 					float32(baseX+bx),
 					float32(nh+1), float32(h+1),
 					float32(baseZ+bz), float32(baseZ+bz+step),
-					-1, color, alpha)
+					-1, color, 1.0)
 			}
 			// +Z neighbour.
 			if bz+step < 16 {
 				nh := surf.Heights[bx][bz+step]
 				if nh < h {
-					appendSurfaceSideZ(&verts,
+					appendSurfaceSideZ(&opaque,
 						float32(baseZ+bz+step),
 						float32(nh+1), float32(h+1),
 						float32(baseX+bx), float32(baseX+bx+step),
-						+1, color, alpha)
+						+1, color, 1.0)
 				}
 			} else if nh, ok := neighbourHeight(0, 1, bx, 0); ok && nh < h {
-				appendSurfaceSideZ(&verts,
+				appendSurfaceSideZ(&opaque,
 					float32(baseZ+bz+step),
 					float32(nh+1), float32(h+1),
 					float32(baseX+bx), float32(baseX+bx+step),
-					+1, color, alpha)
+					+1, color, 1.0)
 			}
 			// -Z neighbour.
 			if bz-step >= 0 {
 				nh := surf.Heights[bx][bz-step]
 				if nh < h {
-					appendSurfaceSideZ(&verts,
+					appendSurfaceSideZ(&opaque,
 						float32(baseZ+bz),
 						float32(nh+1), float32(h+1),
 						float32(baseX+bx), float32(baseX+bx+step),
-						-1, color, alpha)
+						-1, color, 1.0)
 				}
 			} else if nh, ok := neighbourHeight(0, -1, bx, 15); ok && nh < h {
-				appendSurfaceSideZ(&verts,
+				appendSurfaceSideZ(&opaque,
 					float32(baseZ+bz),
 					float32(nh+1), float32(h+1),
 					float32(baseX+bx), float32(baseX+bx+step),
-					-1, color, alpha)
+					-1, color, 1.0)
 			}
 		}
 	}
-	return verts
+	return opaque, translucent
 }
 
 // appendSurfaceTop emits a top (+Y) quad for a distant surface cell.
