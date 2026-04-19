@@ -49,9 +49,11 @@ const (
 	// streamLOD0Budget caps per-frame LOD 0 chunk loads (disk read +
 	// terrain gen + lighting).
 	streamLOD0Budget = 4
-	// streamSurfaceBudget caps per-frame cached surface noise evals
-	// (LOD 1/2 only; tiers 3/4 don't cache).
-	streamSurfaceBudget = 32
+	// streamSurfaceBudget caps per-frame cached surface builds
+	// (LOD 1/2). Lower than before because computeSurface now runs the
+	// full generateChunk pass so trees appear at distance — costs ~1 ms
+	// per chunk vs ~0.05 ms when it was noise-only.
+	streamSurfaceBudget = 8
 )
 
 // lodRadii holds the outer chunk-distance of each LOD tier. Indices line
@@ -160,22 +162,41 @@ type ChunkSurface struct {
 	Surface [16][16]uint8
 }
 
-// computeSurface derives the 16x16 heightmap and surface block id for
-// the chunk at `coord`. Pure function of the terrain generator's noise;
-// no disk touch, no full 16x128x16 allocation.
+// computeSurface runs the full terrain generator (including tree
+// placement) into a temporary Chunk and extracts the topmost non-air
+// block per column. Trees therefore contribute leaves/wood to the LOD
+// surface so distant forests render as visible canopies instead of bare
+// biome-colour terrain. Used for the cached tiers (LOD 1/2).
+//
+// Cost: one generateChunk pass (~32k block-fill ops + Perlin queries).
+// The result is cached so the cost is paid once per chunk per streaming
+// session. Budget `streamSurfaceBudget` controls the per-frame cap.
 func (g *terrainGen) computeSurface(coord Point2D) *ChunkSurface {
-	surf := &ChunkSurface{Coordinates: coord}
+	var c Chunk
+	c.Coordinates = coord
+	g.generateChunk(&c)
+	return extractSurface(&c)
+}
 
-	baseX := coord.x << 4
-	baseZ := coord.y << 4
-
+// extractSurface scans every column of c for the topmost non-air block
+// and records its Y + block id on a new ChunkSurface. Shared helper so
+// any caller holding a fully generated Chunk derives its distant-tier
+// summary the same way.
+func extractSurface(c *Chunk) *ChunkSurface {
+	surf := &ChunkSurface{Coordinates: c.Coordinates}
 	for bx := 0; bx < 16; bx++ {
 		for bz := 0; bz < 16; bz++ {
-			wx := baseX + bx
-			wz := baseZ + bz
-			h, id := g.sampleSurface(wx, wz)
-			surf.Heights[bx][bz] = h
-			surf.Surface[bx][bz] = id
+			surf.Heights[bx][bz] = 0
+			surf.Surface[bx][bz] = IDAir
+			for y := worldHeight - 1; y >= 0; y-- {
+				id := c.Blocks[bx][y][bz]
+				if id == IDAir {
+					continue
+				}
+				surf.Heights[bx][bz] = y
+				surf.Surface[bx][bz] = id
+				break
+			}
 		}
 	}
 	return surf
