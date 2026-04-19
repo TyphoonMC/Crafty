@@ -63,12 +63,16 @@ type chunkMesh struct {
 	dirty          bool
 }
 
-// lodMesh is the distant-tier counterpart to chunkMesh: one opaque vertex
-// stream, no translucent pass (distant water is rendered opaque).
+// lodMesh is the distant-tier counterpart to chunkMesh. Solid terrain lives
+// in the opaque stream; water tops live in the translucent stream so they
+// blend seamlessly with LOD 0 water (same 0.55 alpha).
 type lodMesh struct {
-	vao   uint32
-	vbo   uint32
-	count int32
+	opaqueVAO        uint32
+	opaqueVBO        uint32
+	opaqueCount      int32
+	translucentVAO   uint32
+	translucentVBO   uint32
+	translucentCount int32
 }
 
 type renderer struct {
@@ -195,20 +199,32 @@ func (r *renderer) freeLODMesh(m *lodMesh) {
 	if m == nil {
 		return
 	}
-	if m.vbo != 0 {
-		gl.DeleteBuffers(1, &m.vbo)
-		m.vbo = 0
+	if m.opaqueVBO != 0 {
+		gl.DeleteBuffers(1, &m.opaqueVBO)
+		m.opaqueVBO = 0
 	}
-	if m.vao != 0 {
-		gl.DeleteVertexArrays(1, &m.vao)
-		m.vao = 0
+	if m.opaqueVAO != 0 {
+		gl.DeleteVertexArrays(1, &m.opaqueVAO)
+		m.opaqueVAO = 0
 	}
-	m.count = 0
+	if m.translucentVBO != 0 {
+		gl.DeleteBuffers(1, &m.translucentVBO)
+		m.translucentVBO = 0
+	}
+	if m.translucentVAO != 0 {
+		gl.DeleteVertexArrays(1, &m.translucentVAO)
+		m.translucentVAO = 0
+	}
+	m.opaqueCount = 0
+	m.translucentCount = 0
 }
 
-// uploadLODMesh replaces the vertex stream of a distant-tier mesh.
-func (r *renderer) uploadLODMesh(m *lodMesh, verts []ChunkVertex) {
-	m.count = uploadVertexStream(&m.vao, &m.vbo, verts)
+// uploadLODMesh replaces both the opaque and translucent vertex streams of
+// a distant-tier mesh. Attribute layout is identical to the chunk mesh so
+// the streams share the chunk shader program.
+func (r *renderer) uploadLODMesh(m *lodMesh, opaque, translucent []ChunkVertex) {
+	m.opaqueCount = uploadVertexStream(&m.opaqueVAO, &m.opaqueVBO, opaque)
+	m.translucentCount = uploadVertexStream(&m.translucentVAO, &m.translucentVBO, translucent)
 }
 
 // uploadMesh replaces both the opaque and translucent vertex streams for the

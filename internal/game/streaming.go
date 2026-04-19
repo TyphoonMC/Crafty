@@ -128,9 +128,12 @@ func (game *Game) refreshLODMeshes() {
 		if _, ok := r.lodMeshes[coord]; ok {
 			continue
 		}
-		verts := BuildSurfaceMesh(surf, distantLODStep)
+		neighbour := func(dx, dz int) *ChunkSurface {
+			return game.surfaces[Point2D{coord.x + dx, coord.y + dz}]
+		}
+		opaque, translucent := BuildSurfaceMesh(surf, distantLODStep, neighbour)
 		m := &lodMesh{}
-		r.uploadLODMesh(m, verts)
+		r.uploadLODMesh(m, opaque, translucent)
 		r.lodMeshes[coord] = m
 	}
 }

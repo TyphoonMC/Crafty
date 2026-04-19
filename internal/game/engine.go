@@ -122,20 +122,28 @@ func (game *Game) drawScene() {
 		gl.DrawArrays(gl.TRIANGLES, 0, m.opaqueCount)
 	}
 	for _, m := range r.lodMeshes {
-		if m.count == 0 {
+		if m.opaqueCount == 0 {
 			continue
 		}
-		gl.BindVertexArray(m.vao)
-		gl.DrawArrays(gl.TRIANGLES, 0, m.count)
+		gl.BindVertexArray(m.opaqueVAO)
+		gl.DrawArrays(gl.TRIANGLES, 0, m.opaqueCount)
 	}
 
 	// Pass 2: translucent geometry blends over the opaque frame, with depth
 	// testing enabled but depth writes off (standard translucent trick so
-	// overlapping translucent fragments don't fight each other).
+	// overlapping translucent fragments don't fight each other). LOD 0 water
+	// renders first, then distant-tier water so the two blend consistently.
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	gl.DepthMask(false)
 	for _, m := range r.meshes {
+		if m.translucentCount == 0 {
+			continue
+		}
+		gl.BindVertexArray(m.translucentVAO)
+		gl.DrawArrays(gl.TRIANGLES, 0, m.translucentCount)
+	}
+	for _, m := range r.lodMeshes {
 		if m.translucentCount == 0 {
 			continue
 		}
