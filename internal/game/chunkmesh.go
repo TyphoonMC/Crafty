@@ -113,6 +113,12 @@ func BuildChunkMesh(
 				for b := 0; b < bMax; b++ {
 					lx, ly, lz := meshLocalCoords(axis, s, a, b)
 					id := blockAt(baseX+lx, ly, baseZ+lz)
+					// Non-full-cube blocks (carved leaves, round trunks, etc.)
+					// are emitted by the per-block pass below; skip them here
+					// so the greedy cube mesher doesn't draw them as full cubes.
+					if info := Block(id); info == nil || !info.FullCube {
+						continue
+					}
 					nid := blockAt(baseX+lx+dir.x, ly+dir.y, baseZ+lz+dir.z)
 
 					draw, trans := faceVisible(id, nid)
@@ -191,7 +197,109 @@ func BuildChunkMesh(
 			}
 		}
 	}
+
+	// Second pass: emit pre-built per-block voxel meshes for non-full-cube
+	// blocks (carved leaves, round trunks, ...). The population of such blocks
+	// per chunk is tiny (tree trunks + leaves), so an O(n) scan is cheap.
+	for bx := 0; bx < 16; bx++ {
+		for by := 0; by < worldHeight; by++ {
+			for bz := 0; bz < 16; bz++ {
+				wx, wy, wz := baseX+bx, by, baseZ+bz
+				id := blockAt(wx, wy, wz)
+				if id == 0 {
+					continue
+				}
+				info := Block(id)
+				if info == nil || info.FullCube || info.Transparent || info.PerBlockMesh == nil {
+					continue
+				}
+				opaque, translucent = appendPerBlockQuads(opaque, translucent, info, id, wx, wy, wz, blockAt, lightAt)
+			}
+		}
+	}
 	return opaque, translucent
+}
+
+// appendPerBlockQuads emits the per-voxel greedy quads for a non-full-cube
+// block at world position (wx, wy, wz). For each of the six face directions,
+// entire faces are hidden when the neighbour fully occludes them (full-cube
+// opaque neighbour, or an adjacent identical non-full-cube block).
+func appendPerBlockQuads(
+	opaque, translucent []ChunkVertex,
+	info *BlockInfo,
+	id uint8,
+	wx, wy, wz int,
+	blockAt func(x, y, z int) uint8,
+	lightAt func(x, y, z int) (r, g, b, sky float32),
+) ([]ChunkVertex, []ChunkVertex) {
+	mesh := info.PerBlockMesh
+	alpha := info.Alpha
+	trans := info.Translucent
+
+	for dir := 0; dir < 6; dir++ {
+		quads := mesh.Faces[dir]
+		if len(quads) == 0 {
+			continue
+		}
+		off := faceOffsets[dir]
+		nx, ny, nz := wx+off.x, wy+off.y, wz+off.z
+		nid := blockAt(nx, ny, nz)
+		// Hide faces completely occluded by the neighbour.
+		if nid != 0 {
+			if nInfo := Block(nid); nInfo != nil {
+				// Full-cube opaque neighbour: entire face direction is hidden.
+				if nInfo.Opaque {
+					continue
+				}
+				// Identical non-full-cube neighbour (e.g. stacked trunks):
+				// skip this face direction to avoid double-rendering the
+				// shared inner surface.
+				if nid == id {
+					continue
+				}
+			}
+		}
+
+		lr, lg, lb, lsky := lightAt(nx, ny, nz)
+		for i := range quads {
+			if trans {
+				translucent = appendPerBlockQuadTris(translucent, &quads[i], wx, wy, wz, alpha, lr, lg, lb, lsky)
+			} else {
+				opaque = appendPerBlockQuadTris(opaque, &quads[i], wx, wy, wz, 1.0, lr, lg, lb, lsky)
+			}
+		}
+	}
+	return opaque, translucent
+}
+
+// appendPerBlockQuadTris converts a block-local Quad into two ChunkVertex
+// triangles, translating the [0,1] block-local vertex coordinates by the
+// block's world position and tagging them with the supplied alpha/light.
+func appendPerBlockQuadTris(
+	verts []ChunkVertex,
+	q *Quad,
+	wx, wy, wz int,
+	alpha, lr, lg, lb, lsky float32,
+) []ChunkVertex {
+	bx := float32(wx)
+	by := float32(wy)
+	bz := float32(wz)
+	r := float32(q.Color.R) / 255
+	g := float32(q.Color.G) / 255
+	bcol := float32(q.Color.B) / 255
+	nx, ny, nz := q.Normal[0], q.Normal[1], q.Normal[2]
+
+	mk := func(p [3]float32) ChunkVertex {
+		return ChunkVertex{
+			X: bx + p[0], Y: by + p[1], Z: bz + p[2],
+			Nx: nx, Ny: ny, Nz: nz,
+			R: r, G: g, B: bcol, A: alpha,
+			LR: lr, LG: lg, LB: lb, LSky: lsky,
+		}
+	}
+	verts = append(verts, mk(q.V[0]), mk(q.V[1]), mk(q.V[2]))
+	verts = append(verts, mk(q.V[0]), mk(q.V[2]), mk(q.V[3]))
+	return verts
 }
 
 // faceDims returns the sweep axis, slice count and 2D plane dimensions (aMax,

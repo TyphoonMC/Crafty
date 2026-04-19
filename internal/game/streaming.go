@@ -128,7 +128,19 @@ func (game *Game) refreshLODMeshes() {
 		if _, ok := r.lodMeshes[coord]; ok {
 			continue
 		}
-		verts := BuildSurfaceMesh(surf, distantLODStep)
+		coord := coord
+		verts := BuildSurfaceMesh(surf, distantLODStep, func(dx, dz int) *ChunkSurface {
+			nb := Point2D{coord.x + dx, coord.y + dz}
+			if s, ok := game.surfaces[nb]; ok {
+				return s
+			}
+			// Also fall back to LOD 0 chunk heights if the neighbour is a full chunk.
+			// Compute a surface on the fly (just noise — cheap) if LOD 0 exists.
+			if _, ok := game.chunks[nb]; ok {
+				return game.gen.computeSurface(nb)
+			}
+			return nil
+		})
 		m := &lodMesh{}
 		r.uploadLODMesh(m, verts)
 		r.lodMeshes[coord] = m

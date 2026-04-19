@@ -44,3 +44,4 @@ Thumbs.db
 # Tool-generated
 CLAUDE.md
 **/CLAUDE.md
+.claude/

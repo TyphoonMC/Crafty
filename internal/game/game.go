@@ -228,10 +228,34 @@ func (game *Game) getBlockAt(x, y, z int) uint8 {
 	}
 	chunk, b := game.getChunkBlockAt(x, y, z)
 	chk := game.getChunk(chunk.x, chunk.y, false)
-	if chk == nil {
+	if chk != nil {
+		return chk.Blocks[b.x][b.y][b.z]
+	}
+	return game.inferBlockFromSurface(x, y, z)
+}
+
+// inferBlockFromSurface returns an approximate block id for a chunk we don't
+// have fully loaded but for which we have a distant surface. Used so the
+// chunk mesher can correctly cull faces between LOD 0 and distant chunks.
+func (game *Game) inferBlockFromSurface(x, y, z int) uint8 {
+	if y < 0 || y >= worldHeight {
 		return 0
 	}
-	return chk.Blocks[b.x][b.y][b.z]
+	coord, b := game.getChunkBlockAt(x, y, z)
+	surf, ok := game.surfaces[*coord]
+	if !ok {
+		return 0
+	}
+	h := surf.Heights[b.x][b.z]
+	s := surf.Surface[b.x][b.z]
+	switch {
+	case y > h:
+		return IDAir
+	case y == h:
+		return s
+	default:
+		return IDStone
+	}
 }
 
 func (game *Game) getBlockAtF(d *FPoint3D) uint8 {

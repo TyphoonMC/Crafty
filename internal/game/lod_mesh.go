@@ -1,17 +1,20 @@
 package game
 
-// BuildSurfaceMesh produces a simple top-face + side-skirt mesh for the
-// given chunk surface at the requested LOD level. `lod` controls the
-// sampling stride: step = 1 << lod, so LOD 0 = per-block, LOD 2 = every
-// 4 blocks. Only the top face (plus side skirts when a neighbour column is
-// lower) is emitted — no bottom, no back-side faces between adjacent
-// columns.
+// BuildSurfaceMesh produces a simple top-face + side-skirt mesh for the given
+// chunk surface at the requested LOD level. `neighbour(dx, dz)` returns the
+// neighbouring surface at chunk offset (dx, dz), or nil if unavailable.
+// Pass nil to keep the legacy no-seam-fix behaviour (intra-chunk only).
+//
+// `lod` controls the sampling stride: step = 1 << lod, so LOD 0 = per-block,
+// LOD 2 = every 4 blocks. Only the top face (plus side skirts when a
+// neighbour column is lower) is emitted — no bottom, no back-side faces
+// between adjacent columns.
 //
 // The mesh is always opaque and sits in a single vertex stream. Per-vertex
 // light is the ambient-outdoor fallback: no block light, full sky light,
 // so the shared chunk shader lights the distant terrain correctly without
 // needing a second program.
-func BuildSurfaceMesh(surf *ChunkSurface, lod int) []ChunkVertex {
+func BuildSurfaceMesh(surf *ChunkSurface, lod int, neighbour func(dx, dz int) *ChunkSurface) []ChunkVertex {
 	if surf == nil {
 		return nil
 	}
@@ -27,6 +30,21 @@ func BuildSurfaceMesh(surf *ChunkSurface, lod int) []ChunkVertex {
 	baseZ := surf.Coordinates.y << 4
 
 	verts := make([]ChunkVertex, 0, 64)
+
+	// neighbourHeight fetches the height of the column at local coordinates
+	// (nbx, nbz) inside the neighbour chunk at offset (dx, dz). Returns
+	// (0, false) when the neighbour is unavailable (nil closure or nil
+	// surface), causing the caller to skip the cross-chunk skirt.
+	neighbourHeight := func(dx, dz, nbx, nbz int) (int, bool) {
+		if neighbour == nil {
+			return 0, false
+		}
+		ns := neighbour(dx, dz)
+		if ns == nil {
+			return 0, false
+		}
+		return ns.Heights[nbx][nbz], true
+	}
 
 	// Top quads: one per sample cell. We pick the representative column at
 	// (bx, bz) and extend the quad by `step` along +X and +Z.
@@ -52,9 +70,11 @@ func BuildSurfaceMesh(surf *ChunkSurface, lod int) []ChunkVertex {
 				float32(baseZ+bz), float32(baseZ+bz+step),
 				color, alpha)
 
-			// Side skirts towards lower neighbours (same chunk only — cross
-			// chunk boundaries are intentionally skipped in v1, the seams
-			// are acceptable at this LOD).
+			// Side skirts towards lower neighbours. Intra-chunk cells look
+			// at the adjacent column in the same surface; cells at the
+			// chunk boundary consult the neighbouring chunk's surface via
+			// the `neighbour` closure so skirts are emitted across chunk
+			// boundaries too.
 			//
 			// +X neighbour.
 			if bx+step < 16 {
@@ -66,6 +86,12 @@ func BuildSurfaceMesh(surf *ChunkSurface, lod int) []ChunkVertex {
 						float32(baseZ+bz), float32(baseZ+bz+step),
 						+1, color, alpha)
 				}
+			} else if nh, ok := neighbourHeight(1, 0, 0, bz); ok && nh < h {
+				appendSurfaceSideX(&verts,
+					float32(baseX+bx+step),
+					float32(nh+1), float32(h+1),
+					float32(baseZ+bz), float32(baseZ+bz+step),
+					+1, color, alpha)
 			}
 			// -X neighbour.
 			if bx-step >= 0 {
@@ -77,6 +103,12 @@ func BuildSurfaceMesh(surf *ChunkSurface, lod int) []ChunkVertex {
 						float32(baseZ+bz), float32(baseZ+bz+step),
 						-1, color, alpha)
 				}
+			} else if nh, ok := neighbourHeight(-1, 0, 15, bz); ok && nh < h {
+				appendSurfaceSideX(&verts,
+					float32(baseX+bx),
+					float32(nh+1), float32(h+1),
+					float32(baseZ+bz), float32(baseZ+bz+step),
+					-1, color, alpha)
 			}
 			// +Z neighbour.
 			if bz+step < 16 {
@@ -88,6 +120,12 @@ func BuildSurfaceMesh(surf *ChunkSurface, lod int) []ChunkVertex {
 						float32(baseX+bx), float32(baseX+bx+step),
 						+1, color, alpha)
 				}
+			} else if nh, ok := neighbourHeight(0, 1, bx, 0); ok && nh < h {
+				appendSurfaceSideZ(&verts,
+					float32(baseZ+bz+step),
+					float32(nh+1), float32(h+1),
+					float32(baseX+bx), float32(baseX+bx+step),
+					+1, color, alpha)
 			}
 			// -Z neighbour.
 			if bz-step >= 0 {
@@ -99,6 +137,12 @@ func BuildSurfaceMesh(surf *ChunkSurface, lod int) []ChunkVertex {
 						float32(baseX+bx), float32(baseX+bx+step),
 						-1, color, alpha)
 				}
+			} else if nh, ok := neighbourHeight(0, -1, bx, 15); ok && nh < h {
+				appendSurfaceSideZ(&verts,
+					float32(baseZ+bz),
+					float32(nh+1), float32(h+1),
+					float32(baseX+bx), float32(baseX+bx+step),
+					-1, color, alpha)
 			}
 		}
 	}

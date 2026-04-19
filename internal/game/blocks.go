@@ -41,6 +41,9 @@ type BlockInfo struct {
 	Solid          bool
 	CollisionBoxes []AABB
 	Voxels         [PackVoxelCount]uint8
+	// PerBlockMesh is the greedy-meshed quad set for non-full-cube blocks.
+	// nil for full-cube blocks (the chunk mesher handles those directly).
+	PerBlockMesh *BlockMesh
 	// Lighting metadata. Emissive is derived from BlockFlagEmissive; the
 	// LightR/G/B channels hold the 0..15 packed colour emitted by the block.
 	Emissive bool
@@ -102,15 +105,21 @@ func LoadBlockPack() error {
 			Emissive:    bd.Flags&BlockFlagEmissive != 0,
 			Voxels:      bd.Voxels,
 		}
-		info.Opaque = !info.Transparent && !info.Translucent
 		info.Alpha = defaultBlockAlpha(info.Name, info.Translucent)
 		info.Color, info.FullCube = dominantColor(pack.Palette, &bd.Voxels)
+		// Non-full-cube blocks have holes, so their face culling cannot hide a
+		// neighbour's face — keep them out of the Opaque set so the chunk
+		// mesher still draws adjacent full-cube faces.
+		info.Opaque = info.FullCube && !info.Transparent && !info.Translucent
 		if info.Solid {
 			if info.FullCube {
 				info.CollisionBoxes = []AABB{{0, 0, 0, 1, 1, 1}}
 			} else {
 				info.CollisionBoxes = greedyMergeCollision(&bd.Voxels)
 			}
+		}
+		if !info.FullCube {
+			info.PerBlockMesh = BuildMesh(pack.Palette, &bd.Voxels)
 		}
 		if info.Emissive {
 			info.LightR, info.LightG, info.LightB = emissiveColor(info.Name)
