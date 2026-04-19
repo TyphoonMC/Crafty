@@ -19,13 +19,92 @@ func (game *Game) setUnfocused() {
 }
 
 func (game *Game) keysCallback(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
-	if action != glfw.Press {
+	// Accept both Press and Repeat so holding Backspace or an arrow key
+	// continues to mutate the edit buffer while the terminal is open.
+	if action == glfw.Release {
 		return
 	}
 	game.mu.Lock()
 	defer game.mu.Unlock()
+
+	if game.terminal != nil && game.terminal.IsOpen() {
+		game.handleTerminalKey(key, action, mods)
+		return
+	}
+
+	if action != glfw.Press {
+		return
+	}
+
 	if key == glfw.KeyEscape {
 		game.setUnfocused()
+		return
+	}
+
+	// Open the terminal on T or /. The matching char event fires right
+	// after — set swallowNextChar so we don't echo the trigger key into
+	// the input buffer.
+	if key == glfw.KeyT || key == glfw.KeySlash {
+		if game.terminal != nil {
+			game.terminal.Open()
+			game.terminal.swallowNextChar = true
+		}
+		game.setUnfocused()
+	}
+}
+
+// handleTerminalKey processes editor-level key events (Enter, Esc, arrows,
+// backspace, history). Printable characters are handled by charCallback.
+func (game *Game) handleTerminalKey(key glfw.Key, action glfw.Action, mods glfw.ModifierKey) {
+	t := game.terminal
+	switch key {
+	case glfw.KeyEscape:
+		t.Close()
+		game.setUnfocused()
+	case glfw.KeyEnter, glfw.KeyKPEnter:
+		line := t.Commit()
+		if line != "" {
+			t.AddOutput("> "+line, RGBA{180, 170, 200, 255})
+			out, handled := dispatchCommand(game, line)
+			if handled && out != "" {
+				t.AddOutput(out, RGBA{220, 240, 200, 255})
+			}
+		}
+		t.Close()
+	case glfw.KeyBackspace:
+		t.Backspace()
+	case glfw.KeyDelete:
+		t.Delete()
+	case glfw.KeyLeft:
+		t.CursorLeft()
+	case glfw.KeyRight:
+		t.CursorRight()
+	case glfw.KeyHome:
+		t.CursorHome()
+	case glfw.KeyEnd:
+		t.CursorEnd()
+	case glfw.KeyUp:
+		t.HistoryUp()
+	case glfw.KeyDown:
+		t.HistoryDown()
+	}
+}
+
+// charCallback receives decoded Unicode codepoints from GLFW. GLFW only
+// emits printable characters here, so control keys (Enter, Backspace,
+// arrows, Esc) are already filtered by the platform.
+func (game *Game) charCallback(w *glfw.Window, char rune) {
+	game.mu.Lock()
+	defer game.mu.Unlock()
+	if game.terminal == nil || !game.terminal.IsOpen() {
+		return
+	}
+	if game.terminal.swallowNextChar {
+		game.terminal.swallowNextChar = false
+		return
+	}
+	if char >= 0x20 && char != 0x7F {
+		game.terminal.InsertRune(char)
 	}
 }
 
@@ -33,6 +112,9 @@ func (game *Game) cursorCallback(w *glfw.Window, xpos float64, ypos float64) {
 	game.mu.Lock()
 	defer game.mu.Unlock()
 	if !game.focus {
+		return
+	}
+	if game.terminal != nil && game.terminal.IsOpen() {
 		return
 	}
 	width, height := game.win.GetSize()
@@ -54,6 +136,13 @@ func (game *Game) cursorCallback(w *glfw.Window, xpos float64, ypos float64) {
 func (game *Game) mouseButtonCallback(w *glfw.Window, button glfw.MouseButton, action glfw.Action, mod glfw.ModifierKey) {
 	game.mu.Lock()
 	defer game.mu.Unlock()
+
+	// While the terminal is open the mouse is the user's "how do I dismiss
+	// this?" escape hatch — don't steal it to refocus gameplay or place a
+	// block. Esc or Enter close the overlay.
+	if game.terminal != nil && game.terminal.IsOpen() {
+		return
+	}
 
 	if !game.focus {
 		game.setFocused()
@@ -79,6 +168,7 @@ func (game *Game) mouseButtonCallback(w *glfw.Window, button glfw.MouseButton, a
 
 func (game *Game) InitInput() {
 	game.win.SetKeyCallback(game.keysCallback)
+	game.win.SetCharCallback(game.charCallback)
 	game.win.SetCursorPosCallback(game.cursorCallback)
 	game.win.SetMouseButtonCallback(game.mouseButtonCallback)
 }
@@ -114,6 +204,12 @@ func (game *Game) inputLoop() {
 	game.player.wishDirX = 0
 	game.player.wishDirZ = 0
 	game.player.wantsJump = false
+
+	// Terminal open — suppress movement intent so typing doesn't also walk
+	// the player around. Look controls are already gated by game.focus.
+	if game.terminal != nil && game.terminal.IsOpen() {
+		return
+	}
 
 	var dForward, dRight float32
 	if game.checkKey(glfw.KeyW) || game.checkKey(glfw.KeyUp) {

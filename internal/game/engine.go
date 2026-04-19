@@ -24,6 +24,9 @@ func (game *Game) InitRenderer() error {
 
 // ShutdownRenderer releases GPU resources. Safe to call once at exit.
 func (game *Game) ShutdownRenderer() {
+	if game.terminal != nil {
+		game.terminal.Shutdown()
+	}
 	if game.renderer != nil {
 		game.renderer.shutdown()
 		game.renderer = nil
@@ -146,6 +149,18 @@ func (game *Game) drawScene() {
 	gl.Disable(gl.BLEND)
 
 	gl.BindVertexArray(0)
+
+	// Pass 3: the terminal overlay. Drawn after everything else with depth
+	// test disabled and alpha blending on so the panel sits flat on top of
+	// the world. We only issue draw calls when the terminal is open.
+	if game.terminal != nil && game.terminal.IsOpen() {
+		gl.Disable(gl.DEPTH_TEST)
+		gl.Enable(gl.BLEND)
+		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+		game.terminal.Render(r.viewportW, r.viewportH)
+		gl.Disable(gl.BLEND)
+		gl.Enable(gl.DEPTH_TEST)
+	}
 }
 
 const targetFrameNanos = 16_666_666

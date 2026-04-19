@@ -56,6 +56,9 @@ type Game struct {
 	gen *terrainGen
 
 	renderer *renderer
+
+	// terminal is the in-game console overlay (press T or / to open).
+	terminal *Terminal
 }
 
 func NewGame() *Game {
@@ -64,6 +67,7 @@ func NewGame() *Game {
 		middle:   Point2D{0, 0},
 		chunks:   make(map[Point2D]*Chunk),
 		surfaces: make(map[Point2D]*ChunkSurface),
+		terminal: &Terminal{},
 	}
 
 	g.gen = newTerrainGen(189766828)
