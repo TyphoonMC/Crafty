@@ -1,12 +1,16 @@
 package game
 
-// ChunkVertex is one vertex of the chunk mesh. Layout: 10 floats, 40 bytes.
+// ChunkVertex is one vertex of the chunk mesh. Layout: 14 floats, 56 bytes.
 // The trailing A channel lets the translucent pass shade water/leaves with
-// the per-block alpha loaded from the resource pack.
+// the per-block alpha loaded from the resource pack. LR/LG/LB carry the
+// coloured block light (0..1) and LSky carries the sky light (0..1) sampled
+// from the AIR-side voxel adjacent to each face.
 type ChunkVertex struct {
 	X, Y, Z    float32
 	Nx, Ny, Nz float32
 	R, G, B, A float32
+	LR, LG, LB float32
+	LSky       float32
 }
 
 // blockIsOpaque reports whether a neighbour of the given id should fully
@@ -75,8 +79,13 @@ func faceVisible(a, b uint8) (draw bool, translucent bool) {
 // BuildChunkMesh greedy-meshes a chunk and returns two vertex slices: the
 // opaque geometry (drawn with depth write) and the translucent geometry (drawn
 // afterwards with blending). `blockAt` seamlessly handles cross-chunk
-// neighbour queries.
-func BuildChunkMesh(chunk *Chunk, blockAt func(x, y, z int) uint8) (opaque, translucent []ChunkVertex) {
+// neighbour queries. `lightAt` is sampled once per merged rectangle on the
+// air-side voxel adjacent to the face centre to colour the vertices.
+func BuildChunkMesh(
+	chunk *Chunk,
+	blockAt func(x, y, z int) uint8,
+	lightAt func(x, y, z int) (r, g, b, sky float32),
+) (opaque, translucent []ChunkVertex) {
 	baseX := chunk.Coordinates.x << 4
 	baseZ := chunk.Coordinates.y << 4
 
@@ -159,10 +168,24 @@ func BuildChunkMesh(chunk *Chunk, blockAt func(x, y, z int) uint8) (opaque, tran
 					if info == nil {
 						continue
 					}
+
+					// Sample light at the centre of the merged rectangle on
+					// the air-side neighbour voxel. Integer division gives a
+					// reasonable approximation that avoids floating-point in
+					// the hot path.
+					ca := a + h/2
+					cb := b + w/2
+					clx, cly, clz := meshLocalCoords(axis, s, ca, cb)
+					lr, lg, lb, lsky := lightAt(
+						baseX+clx+dir.x,
+						cly+dir.y,
+						baseZ+clz+dir.z,
+					)
+
 					if trans {
-						translucent = appendQuad(translucent, face, s, a, b, h, w, baseX, baseZ, info.Color, info.Alpha)
+						translucent = appendQuad(translucent, face, s, a, b, h, w, baseX, baseZ, info.Color, info.Alpha, lr, lg, lb, lsky)
 					} else {
-						opaque = appendQuad(opaque, face, s, a, b, h, w, baseX, baseZ, info.Color, 1.0)
+						opaque = appendQuad(opaque, face, s, a, b, h, w, baseX, baseZ, info.Color, 1.0, lr, lg, lb, lsky)
 					}
 				}
 			}
@@ -200,7 +223,9 @@ func meshLocalCoords(axis, s, a, b int) (x, y, z int) {
 // appendQuad emits two triangles (6 vertices) for a greedy-merged rectangle,
 // preserving CCW winding from the outside of the block. The per-vertex alpha
 // comes from the block's runtime metadata (1.0 for opaque, <1 for translucent).
-func appendQuad(verts []ChunkVertex, face, s, a0, b0, h, w, baseX, baseZ int, color RGBA, alpha float32) []ChunkVertex {
+// lr/lg/lb/lsky are the normalized block/sky light sampled once for the whole
+// rectangle at the face centre.
+func appendQuad(verts []ChunkVertex, face, s, a0, b0, h, w, baseX, baseZ int, color RGBA, alpha, lr, lg, lb, lsky float32) []ChunkVertex {
 	fa0 := float32(a0)
 	fa1 := float32(a0 + h)
 	fb0 := float32(b0)
@@ -272,6 +297,7 @@ func appendQuad(verts []ChunkVertex, face, s, a0, b0, h, w, baseX, baseZ int, co
 			X: p[0], Y: p[1], Z: p[2],
 			Nx: n[0], Ny: n[1], Nz: n[2],
 			R: r, G: g, B: bcol, A: alpha,
+			LR: lr, LG: lg, LB: lb, LSky: lsky,
 		}
 	}
 	verts = append(verts, mk(v[0]), mk(v[1]), mk(v[2]))

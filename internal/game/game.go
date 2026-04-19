@@ -21,6 +21,12 @@ const (
 type Chunk struct {
 	Coordinates Point2D
 	Blocks      [16][128][16]uint8
+	// SkyLight: 0..15 per voxel, derived from top-down propagation. Not
+	// serialized to disk — recomputed on chunk load.
+	SkyLight [16][128][16]uint8
+	// BlockLight: packed RGB each channel 0..15 in nibbles
+	// (R<<8 | G<<4 | B). Not serialized to disk.
+	BlockLight [16][128][16]uint16
 }
 
 type Game struct {
@@ -167,18 +173,38 @@ func (game *Game) setBlockAtLocked(x, y, z int, id uint8) {
 		return
 	}
 	chk.Blocks[b.x][b.y][b.z] = id
+
+	// Recompute lighting for the edited chunk from scratch. v1 does not do
+	// incremental relighting: it's fast enough for one chunk (~32k voxels).
+	game.propagateChunkLight(chk)
+
+	// Boundary edits also invalidate light on neighbour chunks (their inward
+	// BFS may pick up light from this chunk's new state, and vice versa).
+	neighbourChunks := make([]*Point2D, 0, 4)
+	if b.x == 0 {
+		n := Point2D{chunk.x - 1, chunk.y}
+		neighbourChunks = append(neighbourChunks, &n)
+	} else if b.x == 15 {
+		n := Point2D{chunk.x + 1, chunk.y}
+		neighbourChunks = append(neighbourChunks, &n)
+	}
+	if b.z == 0 {
+		n := Point2D{chunk.x, chunk.y - 1}
+		neighbourChunks = append(neighbourChunks, &n)
+	} else if b.z == 15 {
+		n := Point2D{chunk.x, chunk.y + 1}
+		neighbourChunks = append(neighbourChunks, &n)
+	}
+	for _, nc := range neighbourChunks {
+		if nchk := game.getChunk(nc.x, nc.y, false); nchk != nil {
+			game.propagateChunkLight(nchk)
+		}
+	}
+
 	if game.renderer != nil {
 		game.renderer.markDirty(*chunk)
-		// Neighbour chunks may need a remesh if the edit touches a boundary.
-		if b.x == 0 {
-			game.renderer.markDirty(Point2D{chunk.x - 1, chunk.y})
-		} else if b.x == 15 {
-			game.renderer.markDirty(Point2D{chunk.x + 1, chunk.y})
-		}
-		if b.z == 0 {
-			game.renderer.markDirty(Point2D{chunk.x, chunk.y - 1})
-		} else if b.z == 15 {
-			game.renderer.markDirty(Point2D{chunk.x, chunk.y + 1})
+		for _, nc := range neighbourChunks {
+			game.renderer.markDirty(*nc)
 		}
 	}
 }
@@ -232,6 +258,8 @@ func (game *Game) loadChunk(coordinate Point2D) *Chunk {
 			panic(err)
 		}
 	}
+	// Light data is not serialized — recompute from block data on every load.
+	game.propagateChunkLight(&c)
 	return &c
 }
 

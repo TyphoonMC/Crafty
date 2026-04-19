@@ -33,6 +33,9 @@ var defaultBlocks = []blockSpec{
 	{name: "leaves_cherry", color: rgb(0xF4, 0xC2, 0xD0), flags: game.BlockFlagSolid | game.BlockFlagTranslucent}, // 12
 	{name: "stone_mossy", color: rgb(0x88, 0xA0, 0x6C), flags: game.BlockFlagSolid},  // 13
 	{name: "clay", color: rgb(0xD4, 0xA0, 0x88), flags: game.BlockFlagSolid},         // 14
+	{name: "lantern_warm", color: rgb(0xF5, 0xC6, 0x74), flags: game.BlockFlagSolid | game.BlockFlagEmissive},   // 15
+	{name: "lantern_cool", color: rgb(0xA5, 0xC8, 0xF0), flags: game.BlockFlagSolid | game.BlockFlagEmissive},   // 16
+	{name: "mushroom_glow", color: rgb(0xB8, 0xE8, 0xB0), flags: game.BlockFlagSolid | game.BlockFlagEmissive},  // 17
 }
 
 func rgb(r, g, b uint8) game.RGBA {
