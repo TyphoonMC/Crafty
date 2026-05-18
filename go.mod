@@ -5,7 +5,7 @@ go 1.22
 require (
 	github.com/TyphoonMC/TyphoonCore v0.0.3
 	github.com/aquilax/go-perlin v1.1.0
-	github.com/chewxy/math32 v1.11.1
+	github.com/chewxy/math32 v1.11.2
 	github.com/go-gl/gl v0.0.0-20260331235117-4566fea9a276
 	github.com/go-gl/glfw/v3.3/glfw v0.0.0-20260406072232-3ac4aa2bb164
 	github.com/go-gl/mathgl v1.2.0
